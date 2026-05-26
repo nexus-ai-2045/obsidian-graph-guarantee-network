@@ -1,6 +1,31 @@
 $script:FdeGraphNetworkFolder = '_graph-network'
 $script:FdeCoverageShardPrefix = 'fde-coverage-shard'
-$script:FdeGraphExcludedTopFolders = @('.obsidian', '.smart-env', '.trash', $script:FdeGraphNetworkFolder)
+$script:FdeGraphExcludedTopFolders = @(
+  '.obsidian',
+  '.smart-env',
+  '.trash',
+  '.git',
+  '.github',
+  '.claude',
+  '.cmux',
+  '.gemini',
+  '.pytest_cache',
+  '_workspace-local-secrets',
+  'node_modules',
+  'tools',
+  $script:FdeGraphNetworkFolder
+)
+$script:FdeGraphExcludedPathParts = @(
+  '.git',
+  '.github',
+  '.pytest_cache',
+  '__pycache__',
+  'node_modules',
+  '.raw',
+  'cache',
+  'vendor',
+  $script:FdeGraphNetworkFolder
+)
 
 function Get-FdeGraphNetworkPath {
   param([string]$Vault)
@@ -29,8 +54,48 @@ function Test-FdeCoveredNotePath {
   )
 
   $relative = $Path.Substring($Vault.Length).TrimStart('\')
-  $top = ($relative -split '\\')[0]
-  return ($script:FdeGraphExcludedTopFolders -notcontains $top)
+  $parts = @($relative -split '\\' | Where-Object { $_ })
+  if ($parts.Count -eq 0) {
+    return $false
+  }
+  $top = $parts[0]
+  if ($script:FdeGraphExcludedTopFolders -contains $top) {
+    return $false
+  }
+  foreach ($part in $parts) {
+    if ($part.StartsWith('.') -and $part -ne '.archive') {
+      return $false
+    }
+    if ($script:FdeGraphExcludedPathParts -contains $part) {
+      return $false
+    }
+    if ($part.ToLowerInvariant().Contains('cache')) {
+      return $false
+    }
+  }
+  return $true
+}
+
+function Get-FdeGraphIgnoreFilters {
+  return @(
+    '.git/',
+    '.github/',
+    '.obsidian/',
+    '.smart-env/',
+    '.trash/',
+    '.pytest_cache/',
+    '**/__pycache__/',
+    '**/node_modules/',
+    '**/.raw/',
+    '**/cache/',
+    '**/vendor/',
+    '_workspace-local-secrets/',
+    'tools/'
+  )
+}
+
+function Get-FdeGraphSearchFilter {
+  return '-path:".git" -path:".github" -path:".obsidian" -path:".smart-env" -path:".pytest_cache" -path:"__pycache__" -path:"node_modules" -path:"_workspace-local-secrets" -path:"tools" -path:"cache" -path:"vendor"'
 }
 
 function Get-FdeGraphColorGroups {

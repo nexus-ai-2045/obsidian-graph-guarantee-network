@@ -42,7 +42,7 @@ function New-TestVault {
   $root = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-test-' + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $root | Out-Null
 
-  $dirs = @('.obsidian', '.smart-env', 'inbox', 'work', 'nested\deep', 'unicode-folder', '.trash', '_graph-network')
+  $dirs = @('.obsidian', '.smart-env', 'inbox', 'work', 'nested\deep', 'unicode-folder', '.trash', '_graph-network', 'node_modules\pkg', '.pytest_cache', 'archive', 'work\.archive')
   foreach ($dir in $dirs) {
     New-Item -ItemType Directory -Force -Path (Join-Path $root $dir) | Out-Null
   }
@@ -71,7 +71,11 @@ function New-TestVault {
     [pscustomobject]@{ Path = 'unicode-folder\utf8-note.md'; Content = '# UTF8 note' },
     [pscustomobject]@{ Path = 'inbox\source [bracket] note.md'; Content = '# Bracket note' },
     [pscustomobject]@{ Path = '_graph-network\manual.md'; Content = '# excluded generated note' },
-    [pscustomobject]@{ Path = '.trash\deleted.md'; Content = '# excluded trash note' }
+    [pscustomobject]@{ Path = '.trash\deleted.md'; Content = '# excluded trash note' },
+    [pscustomobject]@{ Path = 'node_modules\pkg\README.md'; Content = '# excluded dependency readme' },
+    [pscustomobject]@{ Path = '.pytest_cache\README.md'; Content = '# excluded cache readme' },
+    [pscustomobject]@{ Path = 'archive\old.md'; Content = '# included history note' },
+    [pscustomobject]@{ Path = 'work\.archive\old-case.md'; Content = '# included dotted archive note' }
   )
 
   foreach ($entry in $notes) {
@@ -164,7 +168,7 @@ try {
 
   Add-TestResult 'normal run reports guarantee ok' ($first.GuaranteeOk -eq $true) ($first | Out-String)
   Add-TestResult 'second run is idempotent' ($second.UpdatedFiles -eq 0) ($second | Out-String)
-  Add-TestResult 'all expected notes are covered' ($counts.Count -eq 6) "covered=$($counts.Count)"
+  Add-TestResult 'all expected notes are covered' ($counts.Count -eq 8) "covered=$($counts.Count)"
   Add-TestResult 'covered targets exactly match note paths' ($targetDiffs.Count -eq 0) ($targetDiffs | Out-String)
   Add-TestResult 'covered targets do not keep markdown trailing dots' (($counts.ContainsKey('root-note')) -and (-not $counts.ContainsKey('root-note.'))) (($counts.Keys | Sort-Object) -join ', ')
   Add-TestResult 'update output reports no unresolved targets' (($first.MissingTargets -eq 0) -and ($first.UnresolvedTargets -eq 0) -and ($first.TrailingDotTargets -eq 0)) ($first | Out-String)
@@ -184,13 +188,18 @@ try {
   $missingNetworkFiles = @($requiredNetworkFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path (Get-FdeGraphNetworkPath -Vault $vault) $_)) })
   Add-TestResult 'required FDE anchors and lane hubs exist' ($missingNetworkFiles.Count -eq 0) ($missingNetworkFiles -join ', ')
   Add-TestResult 'every covered note has exactly two coverage shard edges' ((@($counts.Values | Where-Object { $_ -ne 2 }).Count) -eq 0) (($counts.GetEnumerator() | Sort-Object Name | Out-String))
-  Add-TestResult 'system and generated folders are excluded' ((-not $counts.ContainsKey('_graph-network/manual')) -and (-not $counts.ContainsKey('.trash/deleted'))) (($counts.Keys | Sort-Object) -join ', ')
+  Add-TestResult 'system/cache/generated folders are excluded while archives stay covered' ((-not $counts.ContainsKey('_graph-network/manual')) -and (-not $counts.ContainsKey('.trash/deleted')) -and (-not $counts.ContainsKey('node_modules/pkg/README')) -and (-not $counts.ContainsKey('.pytest_cache/README')) -and ($counts.ContainsKey('archive/old')) -and ($counts.ContainsKey('work/.archive/old-case'))) (($counts.Keys | Sort-Object) -join ', ')
   Add-TestResult 'generated network stays flat' ((Get-ChildItem -LiteralPath (Join-Path $vault '_graph-network') -Directory -Force | Measure-Object).Count -eq 0) 'nested generated directories found'
   Add-TestResult 'note bodies are not mutated' ((Compare-Object ($beforeHashes.GetEnumerator() | Sort-Object Name) ($afterHashes.GetEnumerator() | Sort-Object Name) -Property Name,Value | Measure-Object).Count -eq 0) 'note hash changed'
   Add-TestResult 'utf8 validation is built into update output' ($first.Utf8Failures -eq 0) ($first | Out-String)
   Add-TestResult 'smart exclusion is enforced by update output' ($first.SmartExcludesGraphNetwork -eq $true) ($first | Out-String)
   Add-TestResult 'graph settings are enforced by update output' ($first.GraphSettingsOk -eq $true) ($first | Out-String)
   $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $appConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\app.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $requiredIgnoreFilters = @('**/node_modules/', '**/__pycache__/', '.pytest_cache/')
+  $missingIgnoreFilters = @($requiredIgnoreFilters | Where-Object { @($appConfig.userIgnoreFilters) -notcontains $_ })
+  Add-TestResult 'app ignore filters exclude cache surfaces but keep graph network visible' (($missingIgnoreFilters.Count -eq 0) -and (@($appConfig.userIgnoreFilters) -notcontains '**/archive/') -and (@($appConfig.userIgnoreFilters) -notcontains '_graph-network/')) (($appConfig | ConvertTo-Json -Depth 8) + [Environment]::NewLine + 'Missing: ' + ($missingIgnoreFilters -join ', '))
+  Add-TestResult 'graph search filter excludes cache but not archive surfaces' (($graphConfig.search -match 'node_modules') -and ($graphConfig.search -match 'cache') -and ($graphConfig.search -notmatch 'archive')) $graphConfig.search
   $graphQueries = @($graphConfig.colorGroups | ForEach-Object { $_.query })
   $missingGraphQueries = @(Get-RequiredFdeGraphColorQueries | Where-Object { $graphQueries -notcontains $_ })
   Add-TestResult 'graph color groups cover FDE and top-level lanes' ((@($graphConfig.colorGroups).Count -ge 30) -and ($graphConfig.'collapse-color-groups' -eq $false) -and ($missingGraphQueries.Count -eq 0)) (($graphConfig | ConvertTo-Json -Depth 12) + [Environment]::NewLine + 'Missing: ' + ($missingGraphQueries -join ', '))
@@ -278,6 +287,20 @@ try {
   Add-TestResult 'bad graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge 30) -and ($result.MissingGraphColorGroups -eq 0)) ($graphConfig | ConvertTo-Json -Depth 12)
 } catch {
   Add-TestResult 'bad graph setting failure path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-TestVault
+  [System.IO.File]::WriteAllText((Join-Path $vault '.obsidian\graph.json'), '', [System.Text.UTF8Encoding]::new($false))
+  $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  Add-TestResult 'empty graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge 30)) ($graphConfig | ConvertTo-Json -Depth 12)
+} catch {
+  Add-TestResult 'empty graph setting failure path' $false $_.Exception.Message
 } finally {
   if ($vault -and (Test-Path -LiteralPath $vault)) {
     Remove-Item -LiteralPath $vault -Recurse -Force

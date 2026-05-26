@@ -75,7 +75,7 @@ function Ensure-GraphSettings {
   $graphConfig = [ordered]@{}
   if (Test-Path -LiteralPath $GraphConfigPath -PathType Leaf) {
     $raw = Get-Content -LiteralPath $GraphConfigPath -Raw -Encoding UTF8
-    if ($raw.Trim().Length -gt 0) {
+    if ($null -ne $raw -and $raw.Trim().Length -gt 0) {
       $existing = $raw | ConvertFrom-Json
       foreach ($property in $existing.PSObject.Properties) {
         $graphConfig[$property.Name] = $property.Value
@@ -85,6 +85,7 @@ function Ensure-GraphSettings {
 
   $graphConfig['showOrphans'] = $false
   $graphConfig['hideUnresolved'] = $true
+  $graphConfig['search'] = Get-FdeGraphSearchFilter
   $graphConfig['showTags'] = $false
   $graphConfig['showAttachments'] = $false
   $graphConfig['collapse-color-groups'] = $false
@@ -332,6 +333,30 @@ if (Test-Path -LiteralPath $graphConfigPath -PathType Leaf) {
   $graphSettingsOk = (($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and ($graphConfig.'collapse-color-groups' -eq $false) -and $graphColorGroupsOk)
 }
 
+$appConfigPath = Join-Path $Vault '.obsidian\app.json'
+$appConfig = [ordered]@{}
+if (Test-Path -LiteralPath $appConfigPath -PathType Leaf) {
+  $rawAppConfig = Get-Content -LiteralPath $appConfigPath -Raw -Encoding UTF8
+  if ($null -ne $rawAppConfig -and $rawAppConfig.Trim().Length -gt 0) {
+    $existingAppConfig = $rawAppConfig | ConvertFrom-Json
+    foreach ($property in $existingAppConfig.PSObject.Properties) {
+      $appConfig[$property.Name] = $property.Value
+    }
+  }
+}
+$appConfig['userIgnoreFilters'] = @(Get-FdeGraphIgnoreFilters)
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $appConfigPath) | Out-Null
+$appJson = $appConfig | ConvertTo-Json -Depth 8
+$encoding = [System.Text.UTF8Encoding]::new($false)
+$appSettingsUpdated = $true
+if (Test-Path -LiteralPath $appConfigPath -PathType Leaf) {
+  $existingAppContent = [System.IO.File]::ReadAllText($appConfigPath, $encoding)
+  $appSettingsUpdated = ($existingAppContent.TrimEnd() -ne $appJson.TrimEnd())
+}
+if ($appSettingsUpdated) {
+  [System.IO.File]::WriteAllText($appConfigPath, $appJson + [Environment]::NewLine, $encoding)
+}
+
 $failures = [System.Collections.Generic.List[string]]::new()
 if ($coveredTargets -ne $notes.Count) {
   $failures.Add("Covered target count mismatch: covered=$coveredTargets notes=$($notes.Count)")
@@ -384,6 +409,7 @@ if ($failures.Count -ne 0) {
   SmartExcludesGraphNetwork = $smartExcludesGraphNetwork
   GraphSettingsOk = $graphSettingsOk
   GraphSettingsUpdated = $graphSettingsUpdated
+  AppSettingsUpdated = $appSettingsUpdated
   GraphColorGroups = @($graphConfig.colorGroups).Count
   MissingGraphColorGroups = $missingGraphColorGroups.Count
   GuaranteeOk = $true
