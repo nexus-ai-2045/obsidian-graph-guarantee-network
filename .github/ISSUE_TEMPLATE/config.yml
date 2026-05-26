@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 公開前レビューが必要な相談
+    url: https://github.com/nexus-ai-2045/obsidian-graph-guarantee-network
+    about: private vault contents や secret を issue に貼らず、必要最小限の情報で相談してください。

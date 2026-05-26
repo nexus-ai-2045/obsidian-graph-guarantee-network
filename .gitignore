@@ -1,0 +1,40 @@
+# Dependencies and caches
+node_modules/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+
+# Build and coverage outputs
+dist/
+build/
+coverage/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Secrets and local environment
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+token.json
+service_account*.json
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Generated Obsidian network output
+_graph-network/
+_graph-network-archive/
+
+# Local vaults and scratch data
+vault/
+scratch/
+tmp/
