@@ -30,6 +30,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Obsidian local app config (must not be published)
+.obsidian/
+
 # Generated Obsidian network output
 _graph-network/
 _graph-network-archive/

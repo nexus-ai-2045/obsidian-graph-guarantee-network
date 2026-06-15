@@ -11,7 +11,11 @@ if (-not (Get-Command rg -ErrorAction SilentlyContinue)) {
 Push-Location -LiteralPath $Root
 try {
   $secretPattern = '(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|BEGIN (RSA|OPENSSH|PRIVATE) KEY|(api[_-]?key|secret|password|passwd|client_secret|refresh_token|access_token)\s*[:=]\s*[''"]?[A-Za-z0-9_./+=-]{12,})'
-  $personalPathPattern = '(C:\\Users\\|D:\\|/Users/|MyDocuments|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|__Eマンガ|成年|DL版|torrent|DMM)'
+  # NOTE: 個人識別子 (mac username / 個人 email) はこの公開スクリプトに直書きしない。
+  # 漏えいベクトルは汎用トークンで検出する: -Users- はダッシュ形パス (例 -Users-<name>-Projects),
+  # Dropbox / OneDrive は cloud-sync フォルダだが、説明文中の語との誤検知を避けるため
+  # パス区切り直後 ([\/]) のときだけ実パス成分として検出する。メールは汎用正規表現で捕捉。
+  $personalPathPattern = '(C:\\Users\\|D:\\|/Users/|-Users-|[\\/](Dropbox|OneDrive)|MyDocuments|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|__Eマンガ|成年|DL版|torrent|DMM)'
 
   $secretMatches = @(rg --hidden -n -i $secretPattern . --glob '!.git/**' --glob '!d-drive-*.csv' --glob '!mydocuments-top-folder-summary.csv' --glob '!tools/public-safety-scan.ps1' 2>$null)
   $pathMatches = @(rg --hidden -n $personalPathPattern . --glob '!.git/**' --glob '!d-drive-*.csv' --glob '!mydocuments-top-folder-summary.csv' --glob '!tools/public-safety-scan.ps1' 2>$null)
