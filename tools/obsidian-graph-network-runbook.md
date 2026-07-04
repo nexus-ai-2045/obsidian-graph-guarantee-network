@@ -26,6 +26,11 @@ updater detects those leftover shard files and fails instead of reporting
 `GuaranteeOk : True`; rerun the same command with `-PruneStale` to archive
 them and restore the guarantee.
 
+Vaults generated before the shard-navigation reduction (when every shard still
+linked `FDE-NETWORK` and `NETWORK-GUARANTEE` directly) are rewritten once on
+the first run with the current layout, so expect `UpdatedFiles > 0` for that
+migration run. The immediate rerun must return to `UpdatedFiles : 0`.
+
 For a fresh operator or agent, use the copy-ready prompt in:
 
 ```text
@@ -54,6 +59,11 @@ The test harness covers:
 - Normal generation
 - Idempotent second run
 - Exactly two FDE coverage shard edges per covered note
+- Single connected wikilink component across all generated network files
+  (auto 8-shard ring and explicit `-BucketCount 17`)
+- Coverage shards never link the root anchors directly, and root anchor
+  degree stays bounded by the lane hub count
+- Clear failure when an isolated generated-marker file splits the network
 - System/generated folder exclusion
 - Flat `_graph-network` structure
 - No note-body mutation
@@ -87,6 +97,7 @@ The command must finish with:
 - `TrailingDotTargets : 0`
 - `LessThanTwo : 0`
 - `MoreThanTwo : 0`
+- `NetworkConnectedComponents : 1`
 - `Utf8Failures : 0`
 - `SmartExcludesGraphNetwork : True`
 - `GraphSettingsOk : True`
@@ -99,6 +110,13 @@ If any of these are false, treat the update as failed and do not trust the graph
 - Notes are not edited.
 - `_graph-network` stays flat; no nested generated folders.
 - Every covered Markdown note gets exactly two FDE coverage shard links.
+- Coverage shards link only the previous shard, the next shard, and their lane
+  hub; shards do not link the root anchors directly (degree reduction). Root
+  anchors reach the shard ring through the lane hubs and the single ring entry
+  link, so root anchor degree stays O(lane count) instead of O(shard count).
+- All generated `_graph-network` files form a single connected wikilink
+  component; the updater fails the run when this is violated and the test
+  harness re-verifies it with a BFS over the parsed `[[...]]` links.
 - Obsidian graph color groups stay enabled for FDE anchors, lane hubs, and coverage shards.
 - `_graph-network` is for Obsidian graph connectivity only and must stay excluded from Smart Connections.
 - No background watcher or scheduled job is used.

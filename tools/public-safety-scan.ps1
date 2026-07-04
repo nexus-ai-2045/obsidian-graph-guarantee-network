@@ -1,3 +1,5 @@
+#Requires -Version 5.1
+
 param(
   [string]$Root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 )
