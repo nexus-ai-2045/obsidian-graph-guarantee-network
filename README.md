@@ -57,6 +57,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\update-obsidian-graph-
 
 ## 公開ステータス
 
-この repository は GitHub 公開準備中です。public release、repository visibility change、announcement、broad sharing には、明示的な human review と approval が必要です。
+この repository は 2026-07-04 に repository-specific approval を得て公開済みです (記録: [PUBLIC_READY.md](PUBLIC_READY.md))。repository visibility change、announcement、broad sharing には、引き続き明示的な human review と approval が必要です。
 
 GitHub 側の repository settings は [GITHUB_SETTINGS.md](GITHUB_SETTINGS.md) に日本語でまとめています。
