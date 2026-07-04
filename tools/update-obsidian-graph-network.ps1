@@ -313,11 +313,34 @@ Get-ChildItem -LiteralPath $network -Filter '*.md' -File | ForEach-Object {
   }
 }
 
-$smartConfigPath = Join-Path $Vault '.smart-env\smart_env.json'
 $smartExcludesGraphNetwork = $false
+# Legacy Smart Connections layout: vault-root .smart-env\smart_env.json
+$smartConfigPath = Join-Path $Vault '.smart-env\smart_env.json'
 if (Test-Path -LiteralPath $smartConfigPath -PathType Leaf) {
   $smartConfig = Get-Content -LiteralPath $smartConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
-  $smartExcludesGraphNetwork = ($smartConfig.smart_sources.folder_exclusions -match '_graph-network')
+  if ($smartConfig.smart_sources.folder_exclusions -match '_graph-network') {
+    $smartExcludesGraphNetwork = $true
+  }
+}
+# Current Smart Connections / Open Connections fork (>=3.x): settings persist in the
+# plugin's own data.json under settings.smart_sources.folder_exclusions. Scan every
+# installed plugin so the guarantee matches whichever Smart-style plugin is in use.
+if (-not $smartExcludesGraphNetwork) {
+  $pluginsRoot = Join-Path $Vault '.obsidian\plugins'
+  if (Test-Path -LiteralPath $pluginsRoot -PathType Container) {
+    $pluginDataFiles = @(Get-ChildItem -LiteralPath $pluginsRoot -Filter 'data.json' -File -Recurse -ErrorAction SilentlyContinue)
+    foreach ($pluginData in $pluginDataFiles) {
+      try {
+        $pluginConfig = Get-Content -LiteralPath $pluginData.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($pluginConfig.settings.smart_sources.folder_exclusions -match '_graph-network') {
+          $smartExcludesGraphNetwork = $true
+          break
+        }
+      } catch {
+        # Non-JSON or unrelated plugin data.json; ignore and keep scanning.
+      }
+    }
+  }
 }
 
 $graphConfigPath = Join-Path $Vault '.obsidian\graph.json'

@@ -281,6 +281,32 @@ try {
 
 try {
   $vault = New-TestVault
+  # Drop the legacy Smart Connections config so this case only passes via the current
+  # plugin layout (settings.smart_sources.folder_exclusions in the plugin's data.json).
+  Remove-Item -LiteralPath (Join-Path $vault '.smart-env\smart_env.json') -Force
+  $pluginDir = Join-Path $vault '.obsidian\plugins\open-connections'
+  New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+  @{
+    installed_at = 1
+    last_version = '3.9.47'
+    settings = @{
+      smart_sources = @{
+        folder_exclusions = '_graph-network,_workspace-config-archive,.smart-env'
+      }
+    }
+  } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $pluginDir 'data.json') -Encoding UTF8
+  $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  Add-TestResult 'smart exclusion honored via current plugin data.json' ($result.SmartExcludesGraphNetwork -eq $true) ($result | Out-String)
+} catch {
+  Add-TestResult 'plugin data.json smart exclusion path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-TestVault
   '{"showOrphans":true,"hideUnresolved":false,"colorGroups":[]}' | Set-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Encoding UTF8
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
   $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
