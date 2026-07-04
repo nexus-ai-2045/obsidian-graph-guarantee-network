@@ -1,6 +1,6 @@
 param(
-  [string]$Vault = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path,
-  [int]$BucketCount = 64,
+  [string]$Vault,
+  [int]$BucketCount = 0,
   [switch]$PruneStale,
   [string]$ArchiveRoot = (Join-Path ([System.IO.Path]::GetTempPath()) 'graph-network-runs')
 )
@@ -9,14 +9,20 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'obsidian-graph-network-lib.ps1')
 
+if ([string]::IsNullOrWhiteSpace($Vault)) {
+  throw ("Vault path is required. Usage: update-obsidian-graph-network.ps1 -Vault <vault-directory> [-BucketCount <n, 0 = auto>] [-PruneStale] [-ArchiveRoot <directory>]")
+}
+
 if (-not (Test-Path -LiteralPath $Vault -PathType Container)) {
   throw "Vault directory does not exist: $Vault"
 }
 
 $Vault = (Resolve-Path -LiteralPath $Vault).Path
 
-if ($BucketCount -lt 2) {
-  throw "BucketCount must be at least 2."
+if (($BucketCount -ne 0) -and ($BucketCount -lt 2)) {
+  # A single shard cannot give a note two distinct shard edges, so 1 is
+  # rejected here even though Get-FdeStableBuckets tolerates Count=1.
+  throw "BucketCount must be 0 (auto) or at least 2."
 }
 
 $network = Get-FdeGraphNetworkPath -Vault $Vault
@@ -25,29 +31,6 @@ $archive = Join-Path $ArchiveRoot $stamp
 $shardPrefix = $script:FdeCoverageShardPrefix
 
 New-Item -ItemType Directory -Force -Path $network | Out-Null
-
-function Get-StableBuckets {
-  param(
-    [string]$Target,
-    [int]$Count
-  )
-
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Target.ToLowerInvariant())
-    $hash = $sha.ComputeHash($bytes)
-  } finally {
-    $sha.Dispose()
-  }
-
-  $first = [System.BitConverter]::ToUInt32($hash, 0) % $Count
-  $second = [System.BitConverter]::ToUInt32($hash, 4) % $Count
-  if ($second -eq $first) {
-    $second = ($second + 17) % $Count
-  }
-
-  return @([int]$first, [int]$second)
-}
 
 function Write-Utf8IfChanged {
   param(
@@ -108,14 +91,20 @@ $notes = Get-ChildItem -LiteralPath $Vault -Recurse -Force -Filter '*.md' -File 
   Where-Object { Test-FdeCoveredNotePath -Path $_.FullName -Vault $Vault } |
   Sort-Object FullName
 
+if ($BucketCount -ge 1) {
+  $bucketCountUsed = $BucketCount
+} else {
+  $bucketCountUsed = Get-FdeAutoBucketCount -CoveredNoteCount $notes.Count
+}
+
 $buckets = @()
-for ($i = 0; $i -lt $BucketCount; $i++) {
+for ($i = 0; $i -lt $bucketCountUsed; $i++) {
   $buckets += ,([System.Collections.Generic.List[object]]::new())
 }
 
 for ($i = 0; $i -lt $notes.Count; $i++) {
   $target = ConvertTo-FdeWikiTarget -Path $notes[$i].FullName -Vault $Vault
-  $noteBuckets = Get-StableBuckets -Target $target -Count $BucketCount
+  $noteBuckets = Get-FdeStableBuckets -Target $target -Count $bucketCountUsed
   $item = [pscustomobject]@{
     Target = $target
     Name = $notes[$i].BaseName
@@ -160,14 +149,13 @@ foreach ($note in $notes) {
   $expectedTargets[(ConvertTo-FdeWikiTarget -Path $note.FullName -Vault $Vault)] = $true
 }
 
-for ($i = 0; $i -lt $BucketCount; $i++) {
+for ($i = 0; $i -lt $bucketCountUsed; $i++) {
   $fileName = '{0}-{1:D2}.md' -f $shardPrefix, $i
   $path = Join-Path $network $fileName
-  $prev = '{0}-{1:D2}' -f $shardPrefix, (($i + $BucketCount - 1) % $BucketCount)
-  $next = '{0}-{1:D2}' -f $shardPrefix, (($i + 1) % $BucketCount)
+  $prev = '{0}-{1:D2}' -f $shardPrefix, (($i + $bucketCountUsed - 1) % $bucketCountUsed)
+  $next = '{0}-{1:D2}' -f $shardPrefix, (($i + 1) % $bucketCountUsed)
 
-  $topCounts = $buckets[$i] | Group-Object Top | Sort-Object Count -Descending
-  $dominantTop = if ($topCounts.Count -gt 0) { $topCounts[0].Name } else { '' }
+  $dominantTop = Get-FdeDominantTop -Items @($buckets[$i])
   $laneHub = if ($hubMap.ContainsKey($dominantTop)) { $hubMap[$dominantTop] } else { 'hub-lane--other' }
 
   $lines = [System.Collections.Generic.List[string]]::new()
@@ -210,7 +198,7 @@ $summary = @(
   '---',
   'network_generated: true',
   'network_role: guarantee_root',
-  ('bucket_count: {0}' -f $BucketCount),
+  ('bucket_count: {0}' -f $bucketCountUsed),
   ('covered_notes: {0}' -f $notes.Count),
   'minimum_network_edges_per_note: 2',
   '---',
@@ -232,7 +220,7 @@ $rootLines = [System.Collections.Generic.List[string]]::new()
 $rootLines.Add('---')
 $rootLines.Add('network_generated: true')
 $rootLines.Add('network_role: fde_network_root')
-$rootLines.Add(('bucket_count: {0}' -f $BucketCount))
+$rootLines.Add(('bucket_count: {0}' -f $bucketCountUsed))
 $rootLines.Add(('covered_notes: {0}' -f $notes.Count))
 $rootLines.Add('---')
 $rootLines.Add('')
@@ -278,7 +266,7 @@ foreach ($hub in $hubDefinitions) {
 $staleFiles = @()
 if ($PruneStale) {
   $expected = @{}
-  for ($i = 0; $i -lt $BucketCount; $i++) {
+  for ($i = 0; $i -lt $bucketCountUsed; $i++) {
     $expected[('{0}-{1:D2}.md' -f $shardPrefix, $i)] = $true
   }
 
@@ -294,6 +282,18 @@ if ($PruneStale) {
     }
   }
 }
+
+# The guarantee counters below come from this run's in-memory buckets only,
+# so leftover on-disk shards (auto count shrink after note deletions, or a
+# migration from the previous fixed 64-shard layout) would silently keep
+# extra live edges. Detect them from the disk after optional pruning and
+# fail instead of reporting a guarantee the vault no longer satisfies.
+$expectedShardNames = @{}
+for ($i = 0; $i -lt $bucketCountUsed; $i++) {
+  $expectedShardNames[('{0}-{1:D2}.md' -f $shardPrefix, $i)] = $true
+}
+$staleShardFiles = @(Get-ChildItem -LiteralPath $network -Force -File |
+  Where-Object { ($_.Name -like "$shardPrefix-*.md") -and (-not $expectedShardNames.ContainsKey($_.Name)) })
 
 $edgeValues = @($targetEdgeCounts.Values)
 $lessThanTwo = @($edgeValues | Where-Object { $_ -lt 2 }).Count
@@ -399,6 +399,9 @@ if ($lessThanTwo -ne 0) {
 if ($moreThanTwo -ne 0) {
   $failures.Add("Some notes have more than 2 FDE coverage shard edges: $moreThanTwo")
 }
+if ($staleShardFiles.Count -ne 0) {
+  $failures.Add("Stale FDE coverage shard files beyond the current bucket count remain on disk and break the 2-edge guarantee: $($staleShardFiles.Count). Rerun with -PruneStale to archive them.")
+}
 if ($utf8Failures.Count -ne 0) {
   $failures.Add("UTF-8 validation failed for generated network files: $($utf8Failures.Count)")
 }
@@ -417,7 +420,8 @@ if ($failures.Count -ne 0) {
   Vault = $Vault
   CoveredNotes = $notes.Count
   BucketCount = $BucketCount
-  GeneratedCoverageShardFiles = $BucketCount
+  BucketCountUsed = $bucketCountUsed
+  GeneratedCoverageShardFiles = $bucketCountUsed
   LinksPerNote = 2
   NetworkFiles = (Get-ChildItem -LiteralPath $network -Filter '*.md' -File | Measure-Object).Count
   UpdatedFiles = $updatedFiles.Count

@@ -86,6 +86,32 @@ function New-TestVault {
   return $root
 }
 
+function New-SmallTestVault {
+  param([int]$NoteCount = 4)
+
+  $root = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-small-test-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $root '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $root '.smart-env') | Out-Null
+
+  @{
+    showOrphans = $false
+    hideUnresolved = $true
+    showAttachments = $false
+  } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root '.obsidian\graph.json') -Encoding UTF8
+
+  @{
+    smart_sources = @{
+      folder_exclusions = '.obsidian,.smart-env,_graph-network'
+    }
+  } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root '.smart-env\smart_env.json') -Encoding UTF8
+
+  for ($i = 1; $i -le $NoteCount; $i++) {
+    Set-Content -LiteralPath (Join-Path $root ('note-{0}.md' -f $i)) -Value ('# Note {0}' -f $i) -Encoding UTF8
+  }
+
+  return $root
+}
+
 function Invoke-NetworkScript {
   param(
     [string]$Vault,
@@ -172,6 +198,7 @@ try {
   Add-TestResult 'covered targets exactly match note paths' ($targetDiffs.Count -eq 0) ($targetDiffs | Out-String)
   Add-TestResult 'covered targets do not keep markdown trailing dots' (($counts.ContainsKey('root-note')) -and (-not $counts.ContainsKey('root-note.'))) (($counts.Keys | Sort-Object) -join ', ')
   Add-TestResult 'update output reports no unresolved targets' (($first.MissingTargets -eq 0) -and ($first.UnresolvedTargets -eq 0) -and ($first.TrailingDotTargets -eq 0)) ($first | Out-String)
+  Add-TestResult 'explicit bucket count is honored' (($first.BucketCount -eq 8) -and ($first.BucketCountUsed -eq 8) -and ($first.GeneratedCoverageShardFiles -eq 8)) ($first | Out-String)
   $expectedShard00 = '{0}-00.md' -f $script:FdeCoverageShardPrefix
   Add-TestResult 'coverage shards use FDE names' ((Test-Path -LiteralPath (Join-Path (Get-FdeGraphNetworkPath -Vault $vault) $expectedShard00)) -and (-not (Test-Path -LiteralPath (Join-Path (Get-FdeGraphNetworkPath -Vault $vault) 'bridge-00.md')))) "expected $expectedShard00 and no bridge-00.md"
   $requiredNetworkFiles = @(
@@ -349,13 +376,134 @@ try {
   $vault = New-TestVault
   $failed = $false
   try {
-    $null = Invoke-NetworkScript -Vault $vault -BucketCount 1
+    $null = Invoke-NetworkScript -Vault $vault -BucketCount -1
   } catch {
-    $failed = $_.Exception.Message -match 'BucketCount must be at least 2'
+    $failed = $_.Exception.Message -match 'BucketCount must be 0 \(auto\) or at least 2'
   }
-  Add-TestResult 'invalid bucket count fails clearly' $failed 'script did not reject BucketCount=1'
+  Add-TestResult 'invalid bucket count fails clearly' $failed 'script did not reject BucketCount=-1'
 } catch {
   Add-TestResult 'invalid bucket count failure path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-TestVault
+  $failed = $false
+  try {
+    $null = Invoke-NetworkScript -Vault $vault -BucketCount 1
+  } catch {
+    $failed = $_.Exception.Message -match 'BucketCount must be 0 \(auto\) or at least 2'
+  }
+  Add-TestResult 'single bucket count fails clearly' $failed 'script did not reject BucketCount=1'
+} catch {
+  Add-TestResult 'single bucket count failure path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $tieForward = @(
+    [pscustomobject]@{ Top = 'zeta' },
+    [pscustomobject]@{ Top = 'alpha' },
+    [pscustomobject]@{ Top = 'zeta' },
+    [pscustomobject]@{ Top = 'alpha' }
+  )
+  $tieReversed = @($tieForward[3], $tieForward[2], $tieForward[1], $tieForward[0])
+  $majority = @(
+    [pscustomobject]@{ Top = 'zeta' },
+    [pscustomobject]@{ Top = 'zeta' },
+    [pscustomobject]@{ Top = 'alpha' }
+  )
+  $tieResultA = Get-FdeDominantTop -Items $tieForward
+  $tieResultB = Get-FdeDominantTop -Items $tieReversed
+  $majorityResult = Get-FdeDominantTop -Items $majority
+  $emptyResult = Get-FdeDominantTop -Items @()
+  Add-TestResult 'dominant top tie-break resolves by ascending name' (($tieResultA -eq 'alpha') -and ($tieResultB -eq 'alpha') -and ($majorityResult -eq 'zeta') -and ($emptyResult -eq '')) "tieA=$tieResultA tieB=$tieResultB majority=$majorityResult empty=$emptyResult"
+} catch {
+  Add-TestResult 'dominant top tie-break path' $false $_.Exception.Message
+}
+
+try {
+  $allDistinct = $true
+  $collisionIndex = -1
+  for ($i = 0; $i -lt 200; $i++) {
+    $pair = Get-FdeStableBuckets -Target ('inbox/generated-note-{0}' -f $i) -Count 17
+    if ($pair[0] -eq $pair[1]) {
+      $allDistinct = $false
+      $collisionIndex = $i
+      break
+    }
+  }
+  Add-TestResult 'stable buckets stay distinct for bucket count 17' $allDistinct "same bucket pair at index $collisionIndex"
+  $repeatA = Get-FdeStableBuckets -Target 'work/stable-target' -Count 17
+  $repeatB = Get-FdeStableBuckets -Target 'work/stable-target' -Count 17
+  Add-TestResult 'stable buckets are deterministic' (($repeatA[0] -eq $repeatB[0]) -and ($repeatA[1] -eq $repeatB[1])) "repeatA=$($repeatA -join ',') repeatB=$($repeatB -join ',')"
+} catch {
+  Add-TestResult 'stable bucket collision path' $false $_.Exception.Message
+}
+
+try {
+  $autoTiny = Get-FdeAutoBucketCount -CoveredNoteCount 4
+  $autoZero = Get-FdeAutoBucketCount -CoveredNoteCount 0
+  $autoMid = Get-FdeAutoBucketCount -CoveredNoteCount 200
+  $autoLarge = Get-FdeAutoBucketCount -CoveredNoteCount 5000
+  Add-TestResult 'auto bucket count clamps between 8 and 64' (($autoTiny -eq 8) -and ($autoZero -eq 8) -and ($autoMid -eq 13) -and ($autoLarge -eq 64)) "tiny=$autoTiny zero=$autoZero mid=$autoMid large=$autoLarge"
+} catch {
+  Add-TestResult 'auto bucket count formula path' $false $_.Exception.Message
+}
+
+try {
+  $failed = $false
+  try {
+    $null = & $ScriptPath -BucketCount 8
+  } catch {
+    $failed = $_.Exception.Message -match 'Vault path is required'
+  }
+  Add-TestResult 'omitted vault fails clearly with usage' $failed 'script did not reject omitted -Vault'
+} catch {
+  Add-TestResult 'omitted vault failure path' $false $_.Exception.Message
+}
+
+try {
+  $vault = New-SmallTestVault -NoteCount 4
+  $archiveRoot = Join-Path $vault '_archive-outside-network'
+  $auto = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot)
+  $autoRerun = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot)
+  $shardFiles = @(Get-ChildItem -LiteralPath (Get-FdeGraphNetworkPath -Vault $vault) -Filter ('{0}-*.md' -f $script:FdeCoverageShardPrefix) -File)
+  Add-TestResult 'auto bucket count sizes small vault to 8 shards' (($auto.BucketCount -eq 0) -and ($auto.BucketCountUsed -eq 8) -and ($shardFiles.Count -eq 8) -and ($auto.CoveredNotes -eq 4) -and ($auto.GuaranteeOk -eq $true)) ($auto | Out-String)
+  Add-TestResult 'auto bucket count rerun is idempotent' (($autoRerun.UpdatedFiles -eq 0) -and ($autoRerun.BucketCountUsed -eq 8)) ($autoRerun | Out-String)
+} catch {
+  Add-TestResult 'auto bucket count behavior' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # Shard ring shrink: an explicit wide layout rerun under the auto default
+  # must not report a guarantee while higher-numbered shards stay on disk.
+  $vault = New-SmallTestVault -NoteCount 20
+  $archiveRoot = Join-Path $vault '_archive-outside-network'
+  $network = Get-FdeGraphNetworkPath -Vault $vault
+  $wide = Get-LastResult -Output (& $ScriptPath -Vault $vault -BucketCount 13 -ArchiveRoot $archiveRoot)
+  $shrinkFailed = $false
+  try {
+    $null = & $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot
+  } catch {
+    $shrinkFailed = $_.Exception.Message -match 'Stale FDE coverage shard files'
+  }
+  Add-TestResult 'auto shrink with stale shards on disk fails clearly' (($wide.BucketCountUsed -eq 13) -and $shrinkFailed) 'script did not reject stale on-disk coverage shards after auto shrink'
+  $pruned = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot -PruneStale)
+  $shardFiles = @(Get-ChildItem -LiteralPath $network -Filter ('{0}-*.md' -f $script:FdeCoverageShardPrefix) -File)
+  Add-TestResult 'auto shrink with prune archives stale shards and restores guarantee' (($pruned.BucketCountUsed -eq 8) -and ($pruned.StaleMoved -eq 5) -and ($shardFiles.Count -eq 8) -and ($pruned.GuaranteeOk -eq $true)) ($pruned | Out-String)
+} catch {
+  Add-TestResult 'auto shrink stale shard behavior' $false $_.Exception.Message
 } finally {
   if ($vault -and (Test-Path -LiteralPath $vault)) {
     Remove-Item -LiteralPath $vault -Recurse -Force

@@ -5,8 +5,26 @@
 Run this after adding, moving, or deleting vault notes:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\update-obsidian-graph-network.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\update-obsidian-graph-network.ps1 -Vault "C:\Path\To\Vault"
 ```
+
+`-Vault` is required and has no default; the updater fails fast with a usage
+error when it is omitted, so a fresh clone can never write into an unintended
+parent directory.
+
+`-BucketCount` defaults to `0` (auto). Auto derives the coverage shard count
+from the covered note count `N` as `min(64, max(8, ceil(N / 16)))`, and the
+updater output reports the resolved value as `BucketCountUsed`. Pass an
+explicit value of `2` or greater to override; `1` and negative values fail
+clearly, because a single shard cannot give a note two distinct shard edges.
+
+When the resolved shard count shrinks — on the first run after upgrading from
+the previous fixed 64-shard default, or after enough note deletions that auto
+resolves to a smaller count — the higher-numbered shard files left on disk
+still carry live links and would break the exact-two-edges guarantee. The
+updater detects those leftover shard files and fails instead of reporting
+`GuaranteeOk : True`; rerun the same command with `-PruneStale` to archive
+them and restore the guarantee.
 
 For a fresh operator or agent, use the copy-ready prompt in:
 
@@ -44,6 +62,7 @@ The test harness covers:
 - Obsidian graph settings and color group restoration
 - Bounded incremental updates after note additions
 - `-PruneStale` behavior
+- Stale coverage shard detection and `-PruneStale` recovery after the shard ring shrinks
 - Clear failures for invalid vaults, invalid bucket counts, and missing Smart exclusion
 
 ## Contract Module

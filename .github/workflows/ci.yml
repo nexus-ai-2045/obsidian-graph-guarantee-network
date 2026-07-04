@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # verify script は unresolved marker 検査に ripgrep (rg) を必須とするため、
+      # runner への preinstall 有無に依存せず無条件で導入する。
+      - name: Install ripgrep
+        run: choco install ripgrep -y --no-progress
+
+      # test harness は fixture vault を OS の temp directory にのみ作成し、
+      # 各 case 終了時に削除する (repo 内には書き込まない)。
+      # そのため直後の verify にある git worktree clean チェックとこの順序で両立する。
+      - name: Run test harness
+        run: pwsh -NoProfile -File tools/test-obsidian-graph-network.ps1
+
+      # verify は失敗時に Write-Error + 非ゼロ exit を返すため、step 失敗として検出される。
+      - name: Run aggregate verification
+        run: pwsh -NoProfile -File tools/verify-obsidian-graph-network.ps1

@@ -76,6 +76,62 @@ function Test-FdeCoveredNotePath {
   return $true
 }
 
+function Get-FdeStableBuckets {
+  param(
+    [string]$Target,
+    [int]$Count
+  )
+
+  if ($Count -lt 1) {
+    throw "Bucket count must be at least 1."
+  }
+
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Target.ToLowerInvariant())
+    $hash = $sha.ComputeHash($bytes)
+  } finally {
+    $sha.Dispose()
+  }
+
+  $first = [int]([System.BitConverter]::ToUInt32($hash, 0) % $Count)
+  $second = [int]([System.BitConverter]::ToUInt32($hash, 4) % $Count)
+  # On a same-bucket collision, probe forward one step at a time so every
+  # count greater than 1 always yields two distinct buckets. A fixed offset
+  # (for example +17) breaks down when the count divides that offset.
+  # Count 1 keeps the same bucket because no second bucket can exist.
+  while (($Count -gt 1) -and ($second -eq $first)) {
+    $second = ($second + 1) % $Count
+  }
+
+  return @([int]$first, [int]$second)
+}
+
+function Get-FdeDominantTop {
+  param([object[]]$Items = @())
+
+  # Count descending, then name ascending: a deterministic tie-break so
+  # equal-sized groups always resolve to the same lane on every run.
+  $groups = @($Items | Group-Object Top | Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Descending = $false })
+  if ($groups.Count -gt 0) {
+    return [string]$groups[0].Name
+  }
+  return ''
+}
+
+function Get-FdeAutoBucketCount {
+  param([int]$CoveredNoteCount)
+
+  if ($CoveredNoteCount -lt 0) {
+    throw "Covered note count must be zero or greater."
+  }
+
+  # min(64, max(8, ceil(N / 16))): small vaults get a small shard ring
+  # instead of a fixed 64-shard layout, large vaults stay capped at 64.
+  $scaled = [int][System.Math]::Ceiling($CoveredNoteCount / 16.0)
+  return [System.Math]::Min(64, [System.Math]::Max(8, $scaled))
+}
+
 function Get-FdeGraphIgnoreFilters {
   return @(
     '.git/',
