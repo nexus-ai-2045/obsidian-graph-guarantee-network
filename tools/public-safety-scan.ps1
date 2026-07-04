@@ -21,8 +21,10 @@ try {
   $pathMatches = @(rg --hidden -n $personalPathPattern . --glob '!.git/**' --glob '!d-drive-*.csv' --glob '!mydocuments-top-folder-summary.csv' --glob '!tools/public-safety-scan.ps1' 2>$null)
   $publicReadyPath = Join-Path $Root 'PUBLIC_READY.md'
   $publicReadyText = if (Test-Path -LiteralPath $publicReadyPath -PathType Leaf) { Get-Content -LiteralPath $publicReadyPath -Raw -Encoding UTF8 } else { '' }
+  # 2026-07-04 に repository-specific approval が付与されたため、interlock の期待値を
+  # approved 状態に更新。文言が崩れたり not approved へ戻った場合は再び fail する。
   $publicReadinessFileOk = (
-    ($publicReadyText -match 'Machine-readable status:\s*not approved for public release') -and
+    ($publicReadyText -match 'Machine-readable status:\s*approved for public release') -and
     ($publicReadyText -match 'Repository-specific approval')
   )
   $largeUntracked = @(git ls-files --others --exclude-standard | ForEach-Object {

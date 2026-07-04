@@ -1,10 +1,10 @@
 # GitHub Repository Settings
 
-この repository は公開準備用の private repository です。public 化は、別途 human review と repository-specific approval があるまで行いません。
+この repository は 2026-07-04 に repository-specific approval を得て公開済みです (承認記録は `PUBLIC_READY.md`)。visibility の再変更や release activity には、引き続き明示的な approval が必要です。
 
 ## 基本設定
 
-- Visibility: `PRIVATE`
+- Visibility: `PUBLIC`
 - Default branch: `main`
 - Description: `Obsidianのノート本文を編集せずにgraph接続性を保証するWindows向けプロンプトとリファレンス実装`
 - Wiki: off
