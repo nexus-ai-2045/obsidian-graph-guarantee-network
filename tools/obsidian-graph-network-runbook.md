@@ -42,6 +42,56 @@ For a fresh operator or agent, use the copy-ready prompt in:
 tools\obsidian-graph-network-generic-windows-prompt.md
 ```
 
+## Audit (read-only)
+
+The audit is a diagnostic, not another updater. Because the updater links every
+covered note through two generated coverage edges, the generated network makes
+every note look connected and hides the vault's own orphans and fragmentation.
+The audit measures the vault's *native* wikilink connectivity with those
+generated coverage edges removed, so the real structure stays visible.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\audit-obsidian-graph-network.ps1 -Vault "C:\Path\To\Vault"
+```
+
+`-Vault` is required and fails fast with a usage error when omitted, exactly
+like the updater. `-Top` is optional and caps the orphan sample size (default
+`20`; pass `0` to suppress the sample list).
+
+The audit is strictly read-only: it never writes, creates, or deletes anything
+in the vault or the repo, never touches the generated `_graph-network` folder,
+and never invokes the updater. It reuses the same covered-note walk, exclusion
+predicate, and wikilink parser as the updater so the two never disagree about
+which notes are in scope.
+
+Wikilink resolution is a basename-based approximation. A link target resolves
+to a covered note by (a) a normalized relative-path match (separators and a
+trailing `.md` ignored) or, failing that, (b) a unique ordinal
+case-insensitive basename match. Targets that are ambiguous (multiple basename
+hits) or unresolved are counted in `UnresolvedLinks` and never form an edge;
+links into the generated `_graph-network` folder are dropped from the native
+graph entirely. The alias, heading, and block parts of a link (`target|alias`,
+`target#heading`, `target^block`) are stripped before resolution.
+
+The audit emits one machine-readable object on the success stream plus a
+human-readable summary on the information stream. The object fields are:
+
+- `Vault` — resolved vault path.
+- `CoveredNotes` — number of notes in scope (nodes in the native graph).
+- `OrphanNotes` — count of covered notes with native degree `0`.
+- `OrphanSample` — up to `-Top` orphan paths, ordinal-sorted.
+- `NativeConnectedComponents` — connected components of the native graph.
+- `LargestComponentSize` — node count of the largest native component.
+- `NativeDegreeMin` / `NativeDegreeMedian` / `NativeDegreeMax` — native degree
+  distribution across covered notes.
+- `UnresolvedLinks` — links that did not resolve to a single covered note.
+- `NotesRescuedByGeneratedNetwork` — native orphans that the generated network
+  connects (equal to `OrphanNotes`).
+
+The output is deterministic: enumeration order, the orphan sample, and the
+component counts are ordinal-stable, so two runs over an unchanged vault produce
+identical output.
+
 ## Test
 
 Run the full local test harness after changing the update script or graph-network operating rules:

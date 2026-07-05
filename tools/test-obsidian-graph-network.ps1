@@ -823,6 +823,155 @@ try {
   }
 }
 
+# ---- read-only native connectivity audit (audit-obsidian-graph-network.ps1) ----
+
+$AuditScriptPath = (Join-Path $PSScriptRoot 'audit-obsidian-graph-network.ps1')
+
+function New-AuditIslandVault {
+  # Two mutually linked two-note islands plus one fully isolated note, so the
+  # native graph has a known shape: OrphanNotes=1, three components, largest
+  # component size 2. No generated network is created; the audit reads only the
+  # author-authored notes.
+  $root = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-audit-island-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $root '.obsidian') | Out-Null
+
+  $notes = @(
+    [pscustomobject]@{ Path = 'islandA-1.md'; Content = "# Island A one`n`n[[islandA-2]]" },
+    [pscustomobject]@{ Path = 'islandA-2.md'; Content = "# Island A two`n`n[[islandA-1|back to one]]" },
+    [pscustomobject]@{ Path = 'islandB-1.md'; Content = "# Island B one`n`n[[islandB-2#heading]]" },
+    [pscustomobject]@{ Path = 'islandB-2.md'; Content = "# Island B two`n`n[[islandB-1]]" },
+    [pscustomobject]@{ Path = 'orphan.md'; Content = '# Orphan note with no links' }
+  )
+  foreach ($entry in $notes) {
+    Set-TestFileUtf8 -Path (Join-Path $root $entry.Path) -Content $entry.Content
+  }
+
+  return $root
+}
+
+function New-AuditAmbiguousVault {
+  # A note linking a duplicated basename (ambiguous) and a non-existent target
+  # (unresolved). Both must land in UnresolvedLinks and neither may form an edge.
+  $root = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-audit-ambiguous-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $root '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $root 'sub1') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $root 'sub2') | Out-Null
+
+  Set-TestFileUtf8 -Path (Join-Path $root 'sub1\dupname.md') -Content '# Duplicate name one'
+  Set-TestFileUtf8 -Path (Join-Path $root 'sub2\dupname.md') -Content '# Duplicate name two'
+  Set-TestFileUtf8 -Path (Join-Path $root 'linker.md') -Content "# Linker`n`n[[dupname]]`n[[missing-note]]"
+
+  return $root
+}
+
+function Invoke-AuditScript {
+  param(
+    [string]$Vault,
+    [int]$Top = 20
+  )
+
+  return & $AuditScriptPath -Vault $Vault -Top $Top
+}
+
+function Get-AuditVaultSnapshot {
+  # Relative path + SHA256 for every file in the vault, used to prove the audit
+  # writes nothing: the snapshot before and after an audit run must be identical.
+  param([string]$Vault)
+
+  $snapshot = @{}
+  Get-ChildItem -LiteralPath $Vault -Recurse -Force -File | ForEach-Object {
+    $relative = $_.FullName.Substring($Vault.Length).TrimStart('\')
+    $snapshot[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+  }
+
+  return $snapshot
+}
+
+try {
+  $vault = New-AuditIslandVault
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'native audit measures orphans, components, and largest island' (($audit.CoveredNotes -eq 5) -and ($audit.OrphanNotes -eq 1) -and ($audit.NativeConnectedComponents -eq 3) -and ($audit.LargestComponentSize -eq 2)) ($audit | Out-String)
+  Add-TestResult 'native audit degree stats reflect the island fixture' (($audit.NativeDegreeMin -eq 0) -and ($audit.NativeDegreeMedian -eq 1) -and ($audit.NativeDegreeMax -eq 1) -and ($audit.UnresolvedLinks -eq 0)) ($audit | Out-String)
+  Add-TestResult 'native audit reports the orphan in its sample' (($audit.OrphanSample.Count -eq 1) -and ($audit.OrphanSample -contains 'orphan')) (($audit.OrphanSample -join ', '))
+  Add-TestResult 'native audit rescued-note count equals native orphans' ($audit.NotesRescuedByGeneratedNetwork -eq $audit.OrphanNotes) ($audit | Out-String)
+} catch {
+  Add-TestResult 'native audit metric path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-AuditAmbiguousVault
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'native audit counts ambiguous and unresolved links' ($audit.UnresolvedLinks -eq 2) ($audit | Out-String)
+  Add-TestResult 'native audit forms no edges from ambiguous or unresolved links' (($audit.CoveredNotes -eq 3) -and ($audit.OrphanNotes -eq 3) -and ($audit.NativeConnectedComponents -eq 3)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'native audit ambiguous/unresolved path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # Signature read-only invariant: the audit must not write, create, or delete
+  # any file in the vault. Snapshot every file (path + SHA256) before and after.
+  $vault = New-AuditIslandVault
+  $before = Get-AuditVaultSnapshot -Vault $vault
+  $null = Invoke-AuditScript -Vault $vault
+  $after = Get-AuditVaultSnapshot -Vault $vault
+  $snapshotDiffs = @(Compare-Object ($before.GetEnumerator() | Sort-Object Name) ($after.GetEnumerator() | Sort-Object Name) -Property Name, Value)
+  Add-TestResult 'audit is strictly read-only (vault file set and hashes unchanged)' (($snapshotDiffs.Count -eq 0) -and ($before.Count -eq $after.Count)) ($snapshotDiffs | Out-String)
+} catch {
+  Add-TestResult 'audit read-only proof path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # Determinism: two audit runs over the same vault must produce identical output.
+  $vault = New-AuditIslandVault
+  $auditA = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  $auditB = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  $jsonA = ($auditA | ConvertTo-Json -Depth 6)
+  $jsonB = ($auditB | ConvertTo-Json -Depth 6)
+  Add-TestResult 'audit output is deterministic across runs' ($jsonA -eq $jsonB) ("runA=" + $jsonA + [Environment]::NewLine + "runB=" + $jsonB)
+} catch {
+  Add-TestResult 'audit determinism path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $failed = $false
+  try {
+    $null = & $AuditScriptPath -Vault (Join-Path ([System.IO.Path]::GetTempPath()) 'definitely-missing-audit-vault')
+  } catch {
+    $failed = $_.Exception.Message -match 'Vault directory does not exist'
+  }
+  Add-TestResult 'audit rejects a missing vault clearly' $failed 'audit did not reject missing vault'
+} catch {
+  Add-TestResult 'audit missing vault failure path' $false $_.Exception.Message
+}
+
+try {
+  $failed = $false
+  try {
+    $null = & $AuditScriptPath
+  } catch {
+    $failed = $_.Exception.Message -match 'Vault path is required'
+  }
+  Add-TestResult 'audit rejects an omitted vault with usage' $failed 'audit did not reject omitted -Vault'
+} catch {
+  Add-TestResult 'audit omitted vault failure path' $false $_.Exception.Message
+}
+
 $tests | Format-Table -AutoSize
 
 if ($failures.Count -ne 0) {

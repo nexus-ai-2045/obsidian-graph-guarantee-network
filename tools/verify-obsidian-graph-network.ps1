@@ -37,6 +37,7 @@ try {
     'PUBLIC_READY.md',
     'tools\obsidian-graph-network-lib.ps1',
     'tools\update-obsidian-graph-network.ps1',
+    'tools\audit-obsidian-graph-network.ps1',
     'tools\test-obsidian-graph-network.ps1',
     'tools\public-safety-scan.ps1',
     'tools\obsidian-graph-network-runbook.md'
