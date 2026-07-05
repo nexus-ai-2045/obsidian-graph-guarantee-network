@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # verify script は unresolved marker 検査に ripgrep (rg) を必須とするため、
       # runner への preinstall 有無に依存せず無条件で導入する。
