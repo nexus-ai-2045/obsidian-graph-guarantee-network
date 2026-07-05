@@ -562,6 +562,20 @@ try {
 }
 
 try {
+  # Mixed-case tie must resolve by ordinal order, not culture collation. Ordinal
+  # ranks 'Foo' (F = 0x46) before 'bar' (b = 0x62); a culture-sensitive sort
+  # would case-insensitively pick 'bar' and diverge across machines.
+  $mixedCaseTie = @(
+    [pscustomobject]@{ Top = 'bar' },
+    [pscustomobject]@{ Top = 'Foo' }
+  )
+  $mixedResult = Get-GraphNetDominantTop -Items $mixedCaseTie
+  Add-TestResult 'dominant top tie-break is ordinal, not culture-sensitive' ($mixedResult -eq 'Foo') "result=$mixedResult (expected Foo)"
+} catch {
+  Add-TestResult 'dominant top ordinal tie-break path' $false $_.Exception.Message
+}
+
+try {
   $allDistinct = $true
   $collisionIndex = -1
   for ($i = 0; $i -lt 200; $i++) {

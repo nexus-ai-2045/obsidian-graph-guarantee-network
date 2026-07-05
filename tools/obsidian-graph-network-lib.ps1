@@ -277,13 +277,19 @@ function Get-GraphNetStableBuckets {
 function Get-GraphNetDominantTop {
   param([object[]]$Items = @())
 
-  # Count descending, then name ascending: a deterministic tie-break so
-  # equal-sized groups always resolve to the same lane on every run.
-  $groups = @($Items | Group-Object Top | Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Descending = $false })
-  if ($groups.Count -gt 0) {
-    return [string]$groups[0].Name
+  # Count descending, then ordinal name ascending: a deterministic tie-break
+  # that resolves identically on every run and every machine. Sort-Object's
+  # default string comparison is culture-sensitive, so a plain Name sort could
+  # pick a different lane under another UI culture and break cross-machine
+  # idempotency; an explicit ordinal sort matches the rest of the pipeline.
+  $groups = @($Items | Group-Object Top)
+  if ($groups.Count -eq 0) {
+    return ''
   }
-  return ''
+  $maxCount = ($groups | Measure-Object -Property Count -Maximum).Maximum
+  $topNames = [string[]]@($groups | Where-Object { $_.Count -eq $maxCount } | ForEach-Object { [string]$_.Name })
+  [System.Array]::Sort($topNames, [System.StringComparer]::Ordinal)
+  return [string]$topNames[0]
 }
 
 function Get-GraphNetAutoBucketCount {

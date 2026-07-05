@@ -218,7 +218,13 @@ function Write-GraphNetNetworkFiles {
     $lines.Add('')
     $lines.Add('## Covered Notes')
 
-    foreach ($item in ($buckets[$i] | Sort-Object Target)) {
+    # Ordinal sort of the covered-note links so a shard body is byte-identical
+    # across machines and UI cultures (Sort-Object Target would collate
+    # punctuation and case per culture and defeat cross-machine idempotency).
+    $bucketItems = [object[]]@($buckets[$i])
+    $bucketKeys = [string[]]@($bucketItems | ForEach-Object { [string]$_.Target })
+    [System.Array]::Sort($bucketKeys, $bucketItems, [System.StringComparer]::Ordinal)
+    foreach ($item in $bucketItems) {
       $lines.Add(('- [[{0}|{1}]]' -f $item.Target, $item.Name))
       if (-not $targetEdgeCounts.ContainsKey($item.Target)) {
         $targetEdgeCounts[$item.Target] = 0
