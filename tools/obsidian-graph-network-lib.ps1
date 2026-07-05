@@ -1,8 +1,8 @@
 #Requires -Version 5.1
 
-$script:FdeGraphNetworkFolder = '_graph-network'
-$script:FdeCoverageShardPrefix = 'fde-coverage-shard'
-$script:FdeGraphExcludedTopFolders = @(
+$script:GraphNetGraphNetworkFolder = '_graph-network'
+$script:GraphNetCoverageShardPrefix = 'coverage-shard'
+$script:GraphNetGraphExcludedTopFolders = @(
   '.obsidian',
   '.smart-env',
   '.trash',
@@ -15,9 +15,9 @@ $script:FdeGraphExcludedTopFolders = @(
   '_workspace-local-secrets',
   'node_modules',
   'tools',
-  $script:FdeGraphNetworkFolder
+  $script:GraphNetGraphNetworkFolder
 )
-$script:FdeGraphExcludedPathParts = @(
+$script:GraphNetGraphExcludedPathParts = @(
   '.git',
   '.github',
   '.pytest_cache',
@@ -26,57 +26,35 @@ $script:FdeGraphExcludedPathParts = @(
   '.raw',
   'cache',
   'vendor',
-  $script:FdeGraphNetworkFolder
+  $script:GraphNetGraphNetworkFolder
 )
 
-# FDE graph color palette (Obsidian RGB integers). Each lane color is defined
-# once here and reused by both the lane hub color group and its matching
-# top-level folder color groups, so a lane never carries two divergent colors.
-$script:FdeColorFdeGold = 16763904   # FDE anchors and brain/fde notes
-$script:FdeColorIntake = 6737151     # intake / unclassified lane
-$script:FdeColorCaptureLog = 56831   # capture log lane
-$script:FdeColorDecision = 16737894  # decision system lane
-$script:FdeColorEvidence = 52267     # evidence / research lane
-$script:FdeColorExecution = 54117    # execution lane
-$script:FdeColorIdentity = 12255487  # identity / strategy lane
-$script:FdeColorOther = 10066329     # other lane and archive/
-$script:FdeColorShard = 8947848      # coverage shards and reports/
-$script:FdeColorLanes = 14431557     # lanes/ decoration only
-$script:FdeColorPractice = 3381759   # lessons-learned/playbooks/patterns decoration
-$script:FdeColorIdeas = 16747520     # ideas/AI-Bridge/nexus_ai decoration
-
-# Single source of truth for the generated lane hubs. Everything lane-shaped is
-# derived from this list: the updater builds its top-folder -> hub routing map
-# and its hub file definitions from it, and Get-FdeGraphColorGroups derives the
-# lane hub color groups from it. Order matters: it drives the Lane Hubs section
-# order in FDE-NETWORK.md and the lane hub color group order in graph.json.
-#   Hub        base file name (without .md) of the generated lane hub
-#   Title      heading and link label for the hub
-#   Color      Obsidian graph color shared with the lane's folder color groups
-#   TopFolders top-level vault folders routed into this lane ('other' catches
-#              everything else and therefore lists none)
-$script:FdeLaneDefinitions = @(
-  [ordered]@{ Hub = 'hub-intake--unclassified'; Title = 'Intake / Unclassified'; Color = $script:FdeColorIntake; TopFolders = @('inbox', 'drafts') },
-  [ordered]@{ Hub = 'hub-lane--capture-log'; Title = 'Capture Log Lane'; Color = $script:FdeColorCaptureLog; TopFolders = @('dev', 'dev-log') },
-  [ordered]@{ Hub = 'hub-lane--decision-system'; Title = 'Decision System Lane'; Color = $script:FdeColorDecision; TopFolders = @('decisions', 'designs') },
-  [ordered]@{ Hub = 'hub-lane--evidence-research'; Title = 'Evidence / Research Lane'; Color = $script:FdeColorEvidence; TopFolders = @('research', 'research-digest', 'references') },
-  [ordered]@{ Hub = 'hub-lane--execution'; Title = 'Execution Lane'; Color = $script:FdeColorExecution; TopFolders = @('work', 'handoffs', 'projects') },
-  [ordered]@{ Hub = 'hub-lane--identity-strategy'; Title = 'Identity / Strategy Lane'; Color = $script:FdeColorIdentity; TopFolders = @('brain', 'lifeops') },
-  [ordered]@{ Hub = 'hub-lane--other'; Title = 'Other Lane'; Color = $script:FdeColorOther; TopFolders = @() }
+# Graph color palette (Obsidian RGB integers). The anchors, coverage shards, and
+# the intake hub carry fixed colors; each lane hub takes the next palette color,
+# cycled deterministically in top-folder order. No personal folder name is ever
+# hard-coded here: lane colors are assigned positionally by Get-GraphNetLaneDefinitions.
+$script:GraphNetColorAnchor = 16763904   # graph-network-root and NETWORK-GUARANTEE
+$script:GraphNetColorShard = 8947848     # coverage shards
+$script:GraphNetColorIntake = 6737151    # intake / unclassified hub (catch-all)
+$script:GraphNetLaneHubPalette = @(
+  56831,     # lane color 0
+  16737894,  # lane color 1
+  52267,     # lane color 2
+  54117,     # lane color 3
+  12255487,  # lane color 4
+  10066329,  # lane color 5
+  3381759,   # lane color 6
+  16747520,  # lane color 7
+  14431557,  # lane color 8
+  16763904   # lane color 9
 )
 
-function Get-FdeLaneDefinitions {
-  # Return the shared lane model. Callers derive the hub routing map, the hub
-  # file definitions, and the lane hub color groups from this single list.
-  return @($script:FdeLaneDefinitions)
-}
-
-function Get-FdeGraphNetworkPath {
+function Get-GraphNetGraphNetworkPath {
   param([string]$Vault)
-  return (Join-Path $Vault $script:FdeGraphNetworkFolder)
+  return (Join-Path $Vault $script:GraphNetGraphNetworkFolder)
 }
 
-function ConvertTo-FdeWikiTarget {
+function ConvertTo-GraphNetWikiTarget {
   param(
     [string]$Path,
     [string]$Vault
@@ -91,22 +69,117 @@ function ConvertTo-FdeWikiTarget {
   return ($withoutExt -replace '\\', '/')
 }
 
-function Test-FdeExcludedPathPart {
+function Get-GraphNetTopFolder {
+  param(
+    [string]$Path,
+    [string]$Vault
+  )
+
+  # The top-level vault folder that owns a covered note, or '' for a note that
+  # sits directly in the vault root. This single derivation drives the dynamic
+  # lane taxonomy: distinct non-empty results become lane hubs and root-level
+  # notes (empty result) are routed to the intake hub.
+  $relative = $Path.Substring($Vault.Length).TrimStart('\')
+  $parts = @($relative -split '\\' | Where-Object { $_ })
+  if ($parts.Count -le 1) {
+    return ''
+  }
+  return $parts[0]
+}
+
+function ConvertTo-GraphNetHubSlug {
+  param([string]$Folder)
+
+  # File-name-safe slug for a top-level folder: lower-cased, every run of
+  # non-alphanumeric characters folded to a single '-', trimmed. A folder made
+  # entirely of non-ASCII characters collapses to 'folder'; collision handling
+  # is the caller's job (Get-GraphNetLaneDefinitions appends a deterministic
+  # numeric suffix).
+  $lower = $Folder.ToLowerInvariant()
+  $slug = [regex]::Replace($lower, '[^a-z0-9]+', '-')
+  $slug = $slug.Trim('-')
+  if ([string]::IsNullOrEmpty($slug)) {
+    $slug = 'folder'
+  }
+  return $slug
+}
+
+function Get-GraphNetLaneDefinitions {
+  param([string[]]$TopFolders = @())
+
+  # Derive the lane model from the vault's own top-level folders instead of any
+  # hard-coded taxonomy. Input is the top folder of every covered note ('' for a
+  # root-level note). Output order is stable: the intake hub first, then one lane
+  # hub per distinct folder in ordinal-ascending order, so hub names, colors, and
+  # link order stay deterministic across runs and machines.
+  #   Hub       base file name (without .md) of the generated hub
+  #   Title     heading and link label (the folder name verbatim; no semantic renaming)
+  #   Color     Obsidian graph color (fixed for intake, palette-cycled for lanes)
+  #   TopFolder routing key: the folder routed into this hub ('' = vault root)
+  $distinct = [System.Collections.Generic.List[string]]::new()
+  $seenFolders = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  foreach ($top in $TopFolders) {
+    if (($top -ne '') -and $seenFolders.Add($top)) {
+      $distinct.Add($top)
+    }
+  }
+  $distinct.Sort([System.StringComparer]::Ordinal)
+
+  $lanes = [System.Collections.Generic.List[object]]::new()
+
+  # The intake hub always exists. It is the catch-all for vault-root notes and
+  # for any shard bucket whose dominant folder cannot be resolved, which keeps
+  # the generated network a single connected component even for vaults with no
+  # root-level notes or with empty shard buckets.
+  $lanes.Add([ordered]@{
+    Hub = 'hub-intake--unclassified'
+    Title = 'Intake / Unclassified'
+    Color = $script:GraphNetColorIntake
+    TopFolder = ''
+  })
+
+  $usedSlugs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  $paletteIndex = 0
+  foreach ($folder in $distinct) {
+    $slug = ConvertTo-GraphNetHubSlug -Folder $folder
+    $baseSlug = $slug
+    $suffix = 2
+    # Ordinal-ascending iteration means the alphabetically earliest original
+    # folder keeps the base slug and later collisions take -2, -3, ... So a slug
+    # clash resolves deterministically in favor of the original folder name.
+    while (-not $usedSlugs.Add($slug)) {
+      $slug = '{0}-{1}' -f $baseSlug, $suffix
+      $suffix++
+    }
+    $color = $script:GraphNetLaneHubPalette[$paletteIndex % $script:GraphNetLaneHubPalette.Count]
+    $paletteIndex++
+    $lanes.Add([ordered]@{
+      Hub = ('hub-lane--{0}' -f $slug)
+      Title = $folder
+      Color = $color
+      TopFolder = $folder
+    })
+  }
+
+  return @($lanes)
+}
+
+function Test-GraphNetExcludedPathPart {
   param(
     [string]$Part,
     [bool]$TopLevel = $false
   )
 
-  # Single per-segment exclusion source shared by Test-FdeCoveredNotePath and
-  # the pruned vault walk in Get-FdeCoveredNoteFiles, so file filtering and
-  # directory pruning can never disagree about what is excluded.
-  if ($TopLevel -and ($script:FdeGraphExcludedTopFolders -contains $Part)) {
+  # Single per-segment exclusion source shared by Test-GraphNetCoveredNotePath
+  # and the pruned vault walk in Get-GraphNetCoveredNoteFiles, so file filtering
+  # and directory pruning can never disagree about what is excluded.
+  if ($TopLevel -and ($script:GraphNetGraphExcludedTopFolders -contains $Part)) {
     return $true
   }
   if ($Part.StartsWith('.') -and $Part -ne '.archive') {
     return $true
   }
-  if ($script:FdeGraphExcludedPathParts -contains $Part) {
+  if ($script:GraphNetGraphExcludedPathParts -contains $Part) {
     return $true
   }
   if ($Part.ToLowerInvariant().Contains('cache')) {
@@ -115,7 +188,7 @@ function Test-FdeExcludedPathPart {
   return $false
 }
 
-function Test-FdeCoveredNotePath {
+function Test-GraphNetCoveredNotePath {
   param(
     [string]$Path,
     [string]$Vault
@@ -127,22 +200,22 @@ function Test-FdeCoveredNotePath {
     return $false
   }
   for ($i = 0; $i -lt $parts.Count; $i++) {
-    if (Test-FdeExcludedPathPart -Part $parts[$i] -TopLevel ($i -eq 0)) {
+    if (Test-GraphNetExcludedPathPart -Part $parts[$i] -TopLevel ($i -eq 0)) {
       return $false
     }
   }
   return $true
 }
 
-function Get-FdeCoveredNoteFiles {
+function Get-GraphNetCoveredNoteFiles {
   param([string]$Vault)
 
   # Iterative vault walk that prunes excluded directories at traversal time
   # instead of enumerating everything recursively and filtering afterwards,
   # so large system trees such as node_modules or .git are never descended
   # into. Pruning and the final per-file check both go through
-  # Test-FdeExcludedPathPart, which keeps the covered note set identical to
-  # a full recursive scan filtered by Test-FdeCoveredNotePath.
+  # Test-GraphNetExcludedPathPart, which keeps the covered note set identical to
+  # a full recursive scan filtered by Test-GraphNetCoveredNotePath.
   $notes = [System.Collections.Generic.List[object]]::new()
   $pending = [System.Collections.Generic.Stack[object]]::new()
   $pending.Push([pscustomobject]@{ Path = $Vault; TopLevel = $true })
@@ -158,10 +231,10 @@ function Get-FdeCoveredNoteFiles {
         if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
           continue
         }
-        if (-not (Test-FdeExcludedPathPart -Part $entry.Name -TopLevel $current.TopLevel)) {
+        if (-not (Test-GraphNetExcludedPathPart -Part $entry.Name -TopLevel $current.TopLevel)) {
           $pending.Push([pscustomobject]@{ Path = $entry.FullName; TopLevel = $false })
         }
-      } elseif (($entry.Name -like '*.md') -and (Test-FdeCoveredNotePath -Path $entry.FullName -Vault $Vault)) {
+      } elseif (($entry.Name -like '*.md') -and (Test-GraphNetCoveredNotePath -Path $entry.FullName -Vault $Vault)) {
         $notes.Add($entry)
       }
     }
@@ -170,7 +243,7 @@ function Get-FdeCoveredNoteFiles {
   return @($notes | Sort-Object FullName)
 }
 
-function Get-FdeStableBuckets {
+function Get-GraphNetStableBuckets {
   param(
     [string]$Target,
     [int]$Count
@@ -201,7 +274,7 @@ function Get-FdeStableBuckets {
   return @([int]$first, [int]$second)
 }
 
-function Get-FdeDominantTop {
+function Get-GraphNetDominantTop {
   param([object[]]$Items = @())
 
   # Count descending, then name ascending: a deterministic tie-break so
@@ -213,7 +286,7 @@ function Get-FdeDominantTop {
   return ''
 }
 
-function Get-FdeAutoBucketCount {
+function Get-GraphNetAutoBucketCount {
   param([int]$CoveredNoteCount)
 
   if ($CoveredNoteCount -lt 0) {
@@ -226,7 +299,7 @@ function Get-FdeAutoBucketCount {
   return [System.Math]::Min(64, [System.Math]::Max(8, $scaled))
 }
 
-function Get-FdeNetworkAdjacency {
+function Get-GraphNetNetworkAdjacency {
   param([string]$NetworkPath)
 
   # Build the undirected wikilink adjacency between generated network files.
@@ -239,13 +312,13 @@ function Get-FdeNetworkAdjacency {
   Get-ChildItem -LiteralPath $NetworkPath -Filter '*.md' -File | ForEach-Object {
     $content = [System.IO.File]::ReadAllText($_.FullName, $encoding)
     if ($content -match '(?m)^network_generated:\s*true\s*$') {
-      $node = '{0}/{1}' -f $script:FdeGraphNetworkFolder, [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+      $node = '{0}/{1}' -f $script:GraphNetGraphNetworkFolder, [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
       $adjacency[$node] = [System.Collections.Generic.HashSet[string]]::new()
       $contents[$node] = $content
     }
   }
 
-  $linkPattern = '\[\[({0}/[^|\]]+)' -f [regex]::Escape($script:FdeGraphNetworkFolder)
+  $linkPattern = '\[\[({0}/[^|\]]+)' -f [regex]::Escape($script:GraphNetGraphNetworkFolder)
   foreach ($node in @($adjacency.Keys)) {
     foreach ($match in [regex]::Matches($contents[$node], $linkPattern)) {
       $target = $match.Groups[1].Value
@@ -259,13 +332,13 @@ function Get-FdeNetworkAdjacency {
   return $adjacency
 }
 
-function Get-FdeNetworkConnectedComponentCount {
+function Get-GraphNetNetworkConnectedComponentCount {
   param([string]$NetworkPath)
 
   # BFS over the generated-file wikilink graph. The guarantee requires exactly
   # one connected component: shard ring -> lane hub -> root anchors must never
   # split into islands, because shards no longer link the roots directly.
-  $adjacency = Get-FdeNetworkAdjacency -NetworkPath $NetworkPath
+  $adjacency = Get-GraphNetNetworkAdjacency -NetworkPath $NetworkPath
   $visited = [System.Collections.Generic.HashSet[string]]::new()
   $components = 0
 
@@ -291,7 +364,73 @@ function Get-FdeNetworkConnectedComponentCount {
   return $components
 }
 
-function Get-FdeGraphIgnoreFilters {
+function Get-GraphNetExpectedGeneratedFiles {
+  param(
+    [int]$BucketCountUsed,
+    [string]$ShardPrefix,
+    [object[]]$LaneDefinitions = @()
+  )
+
+  # The full set of _graph-network files a run generates: the two root anchors,
+  # the coverage shard ring, and every hub (intake plus each lane). Both the
+  # -PruneStale sweep and the validate-phase stale detector treat any generated
+  # file that is NOT in this set as a leftover from an older layout (previous
+  # shard prefix, retired root name, or a hub that no longer matches the lane
+  # model). Keeping one definition means the sweep and the validator can never
+  # disagree about what "current" means. Comparison is case-insensitive to match
+  # Windows file-name semantics.
+  $expected = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $null = $expected.Add('graph-network-root.md')
+  $null = $expected.Add('NETWORK-GUARANTEE.md')
+  for ($i = 0; $i -lt $BucketCountUsed; $i++) {
+    $null = $expected.Add(('{0}-{1:D2}.md' -f $ShardPrefix, $i))
+  }
+  foreach ($lane in $LaneDefinitions) {
+    $null = $expected.Add(('{0}.md' -f $lane.Hub))
+  }
+  return $expected
+}
+
+function Get-GraphNetStaleGeneratedFiles {
+  param(
+    [string]$NetworkPath,
+    [System.Collections.Generic.HashSet[string]]$ExpectedFiles,
+    [string]$ShardPrefix
+  )
+
+  # A _graph-network markdown file is stale when it is not one of this run's
+  # expected generated files AND either:
+  #   * its name matches a generated shard naming pattern (the historical
+  #     'bridge-*' shards, or a '<ShardPrefix>-*' shard beyond the current bucket
+  #     count), or
+  #   * it carries the network_generated marker, which catches every
+  #     previous-generation artifact regardless of name: an older coverage shard
+  #     prefix from an earlier version, a renamed root anchor, and hub files
+  #     that no longer match the current lane model.
+  # Manual notes without the marker and outside the generated name patterns are
+  # never swept, so hand-authored files inside the folder stay put. This single
+  # rule is shared by the -PruneStale sweep and the validate-phase detector so a
+  # plain run fails on the same leftovers that -PruneStale archives.
+  $encoding = [System.Text.UTF8Encoding]::new($false)
+  $stale = [System.Collections.Generic.List[object]]::new()
+  Get-ChildItem -LiteralPath $NetworkPath -Force -File -Filter '*.md' | ForEach-Object {
+    if ($ExpectedFiles.Contains($_.Name)) {
+      return
+    }
+    $isGeneratedName = ($_.Name -like 'bridge-*.md') -or ($_.Name -like "$ShardPrefix-*.md")
+    $carriesMarker = $false
+    if (-not $isGeneratedName) {
+      $content = [System.IO.File]::ReadAllText($_.FullName, $encoding)
+      $carriesMarker = ($content -match '(?m)^network_generated:\s*true\s*$')
+    }
+    if ($isGeneratedName -or $carriesMarker) {
+      $stale.Add($_)
+    }
+  }
+  return @($stale)
+}
+
+function Get-GraphNetGraphIgnoreFilters {
   return @(
     '.git/',
     '.github/',
@@ -309,11 +448,11 @@ function Get-FdeGraphIgnoreFilters {
   )
 }
 
-function Get-FdeGraphSearchFilter {
+function Get-GraphNetGraphSearchFilter {
   return '-path:".git" -path:".github" -path:".obsidian" -path:".smart-env" -path:".pytest_cache" -path:"__pycache__" -path:"node_modules" -path:"_workspace-local-secrets" -path:"tools" -path:"cache" -path:"vendor"'
 }
 
-function New-FdeColorGroup {
+function New-GraphNetColorGroup {
   param(
     [string]$Query,
     [int]$Rgb
@@ -322,65 +461,41 @@ function New-FdeColorGroup {
   return [ordered]@{ query = $Query; color = [ordered]@{ a = 1; rgb = $Rgb } }
 }
 
-function Get-FdeGraphColorGroups {
+function Get-GraphNetGraphColorGroups {
+  param([object[]]$LaneDefinitions = @())
+
   $groups = [System.Collections.Generic.List[object]]::new()
 
-  # Leading FDE anchor and top-level folder color groups (graph view decoration).
-  # These reference the shared palette so folder colors never diverge from the
-  # lane hub color that shares the same lane. The order and membership are kept
-  # explicit because they do not map one-to-one onto the lane model (some lanes
-  # have folders without a color group, and several folders here belong to no
-  # lane at all).
-  $groups.Add((New-FdeColorGroup 'path:"brain/fde/"' $script:FdeColorFdeGold))
-  $groups.Add((New-FdeColorGroup 'path:"brain/"' $script:FdeColorIdentity))
-  $groups.Add((New-FdeColorGroup 'path:"inbox/"' $script:FdeColorIntake))
-  $groups.Add((New-FdeColorGroup 'path:"work/"' $script:FdeColorExecution))
-  $groups.Add((New-FdeColorGroup 'path:"projects/"' $script:FdeColorExecution))
-  $groups.Add((New-FdeColorGroup 'path:"handoffs/"' $script:FdeColorExecution))
-  $groups.Add((New-FdeColorGroup 'path:"decisions/"' $script:FdeColorDecision))
-  $groups.Add((New-FdeColorGroup 'path:"designs/"' $script:FdeColorDecision))
-  $groups.Add((New-FdeColorGroup 'path:"research/"' $script:FdeColorEvidence))
-  $groups.Add((New-FdeColorGroup 'path:"research-digest/"' $script:FdeColorEvidence))
-  $groups.Add((New-FdeColorGroup 'path:"references/"' $script:FdeColorEvidence))
-  $groups.Add((New-FdeColorGroup 'path:"dev/"' $script:FdeColorCaptureLog))
-  $groups.Add((New-FdeColorGroup 'path:"dev-log/"' $script:FdeColorCaptureLog))
-  $groups.Add((New-FdeColorGroup 'path:"lanes/"' $script:FdeColorLanes))
-  $groups.Add((New-FdeColorGroup 'path:"reports/"' $script:FdeColorShard))
-  $groups.Add((New-FdeColorGroup 'path:"archive/"' $script:FdeColorOther))
-  $groups.Add((New-FdeColorGroup 'path:"lessons-learned/"' $script:FdeColorPractice))
-  $groups.Add((New-FdeColorGroup 'path:"playbooks/"' $script:FdeColorPractice))
-  $groups.Add((New-FdeColorGroup 'path:"patterns/"' $script:FdeColorPractice))
-  $groups.Add((New-FdeColorGroup 'path:"ideas/"' $script:FdeColorIdeas))
-  $groups.Add((New-FdeColorGroup 'path:"lifeops/"' $script:FdeColorIdentity))
-  $groups.Add((New-FdeColorGroup 'path:"AI-Bridge/"' $script:FdeColorIdeas))
-  $groups.Add((New-FdeColorGroup 'path:"nexus_ai/"' $script:FdeColorIdeas))
+  # Root anchors (fixed anchor color).
+  $groups.Add((New-GraphNetColorGroup 'path:"_graph-network/graph-network-root"' $script:GraphNetColorAnchor))
+  $groups.Add((New-GraphNetColorGroup 'path:"_graph-network/NETWORK-GUARANTEE"' $script:GraphNetColorAnchor))
 
-  # Root anchors.
-  $groups.Add((New-FdeColorGroup 'path:"_graph-network/FDE-NETWORK"' $script:FdeColorFdeGold))
-  $groups.Add((New-FdeColorGroup 'path:"_graph-network/NETWORK-GUARANTEE"' $script:FdeColorFdeGold))
+  # Coverage shards (fixed shard color).
+  $groups.Add((New-GraphNetColorGroup ('path:"_graph-network/{0}"' -f $script:GraphNetCoverageShardPrefix) $script:GraphNetColorShard))
 
-  # Lane hub color groups, derived from the shared lane model so hub names and
-  # colors stay in lockstep with the updater's hub map and hub definitions.
-  foreach ($lane in $script:FdeLaneDefinitions) {
-    $groups.Add((New-FdeColorGroup ('path:"_graph-network/{0}"' -f $lane.Hub) $lane.Color))
+  # Lane hub color groups, derived from the dynamic lane model so hub names and
+  # colors track the vault's top-level folders. The intake hub carries its fixed
+  # color and each lane hub carries its palette-cycled color, both already
+  # resolved on the lane definition, so this loop stays free of any hard-coded
+  # personal folder name.
+  foreach ($lane in $LaneDefinitions) {
+    $groups.Add((New-GraphNetColorGroup ('path:"_graph-network/{0}"' -f $lane.Hub) $lane.Color))
   }
-
-  # Coverage shards.
-  $groups.Add((New-FdeColorGroup ('path:"_graph-network/{0}"' -f $script:FdeCoverageShardPrefix) $script:FdeColorShard))
 
   return @($groups)
 }
 
-function Get-RequiredFdeGraphColorQueries {
-  return @(
-    'path:"brain/fde/"',
-    'path:"brain/"',
-    'path:"inbox/"',
-    'path:"work/"',
-    'path:"research/"',
-    'path:"decisions/"',
-    'path:"_graph-network/FDE-NETWORK"',
-    'path:"_graph-network/hub-lane--identity-strategy"',
-    'path:"_graph-network/fde-coverage-shard"'
-  )
+function Get-RequiredGraphNetGraphColorQueries {
+  param([object[]]$LaneDefinitions = @())
+
+  # The color group queries the guarantee requires: both root anchors, the
+  # coverage shard prefix, and every generated hub (intake plus each lane).
+  $required = [System.Collections.Generic.List[string]]::new()
+  $required.Add('path:"_graph-network/graph-network-root"')
+  $required.Add('path:"_graph-network/NETWORK-GUARANTEE"')
+  $required.Add(('path:"_graph-network/{0}"' -f $script:GraphNetCoverageShardPrefix))
+  foreach ($lane in $LaneDefinitions) {
+    $required.Add(('path:"_graph-network/{0}"' -f $lane.Hub))
+  }
+  return @($required)
 }

@@ -128,14 +128,16 @@ exclusions:
 
 anchors:
   guarantee_root: "NETWORK-GUARANTEE.md"
-  network_root: "NETWORK.md"
+  network_root: "graph-network-root.md"
   additional_anchors: []
 
 hubs:
   enabled: true
-  default_hub: "hub--other.md"
-  hub_rules: []
-  hub_filename_template: "hub--{name}.md"
+  # lane hub は vault の top-level フォルダから自動導出する (ハードコードしない)。
+  derivation: "vault_top_level_folders"
+  lane_hub_filename_template: "hub-lane--{slug}.md"
+  # top-level フォルダを持たない vault 直下の note を集約する catch-all hub。
+  intake_hub: "hub-intake--unclassified.md"
 
 graph:
   manage_graph_settings: true
@@ -243,7 +245,10 @@ Windows では以下を守ってください。
 - generated coverage node は `coverage_shard_prefix-*.md` 命名にする。
 - `bridge-*` を主要な生成 concept / filename にしない。
 - `network_folder` は Smart Connections の embedding input から除外する。
-- Obsidian graph color groups は anchor / hub / coverage shard 用に有効維持する。
+- lane hub は vault の top-level フォルダから自動導出する (フォルダごとに 1 hub、`hub-lane--<slug>.md`)。lane taxonomy をハードコードしない。
+- top-level フォルダを持たない vault 直下の note は intake hub (`hub-intake--unclassified.md`) に集約する。
+- root anchor (`graph-network-root.md`) と guarantee root は全 lane hub と intake hub を列挙し、生成された `network_folder` 全体が単一の連結成分 (single connected component) を成すようにする。分断されたら失敗として扱う。
+- Obsidian graph color groups は anchor / hub / coverage shard 用に有効維持する。lane hub の色は palette を決定的に cycle して着色し、個人フォルダ名はハードコードしない。
 - graph settings は orphans hidden / unresolved links hidden を維持する。
 - wiki target は vault-relative path から最後の note extension だけを外して作る。
 - trailing-dot target を作りうる extension replacement は使わない。
@@ -339,6 +344,7 @@ Updater output must include and satisfy:
 - `TrailingDotTargets : 0`
 - `LessThanExpected : 0`
 - `MoreThanExpected : 0`
+- `NetworkConnectedComponents : 1` (生成された network folder 全体が単一連結成分)
 - `Utf8Failures : 0`
 - `SmartExcludesNetworkFolder : True` または設定された `not_detected` policy に従った明示的な status
 - `GraphSettingsOk : True`

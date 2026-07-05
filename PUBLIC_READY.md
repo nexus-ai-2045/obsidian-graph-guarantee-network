@@ -25,5 +25,5 @@ repository は 2026-06-22 に public 化され、2026-07-04 に下記 checklist 
 
 ## 継続レビュー観点
 
-- reference scripts には、内部運用由来の FDE-flavored naming が一部残っている (例: `fde-coverage-shard-*`)。公開は承認済みだが、汎用化 (維持・改名・説明追加) は改善 backlog として継続する。
+- reference scripts に残っていた内部運用由来の naming は汎用化済み: coverage shard prefix は `coverage-shard`、root anchor は `graph-network-root`、lane hub は vault の top-level フォルダから自動導出する (`hub-lane--<folder>` / catch-all は `hub-intake--unclassified`)。汎用化の改善 backlog はクローズ。
 - primary public artifact は generic Windows prompt。

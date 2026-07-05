@@ -27,14 +27,19 @@ updater detects those leftover shard files and fails instead of reporting
 them and restore the guarantee.
 
 Vaults generated before the shard-navigation reduction (when every shard still
-linked `FDE-NETWORK` and `NETWORK-GUARANTEE` directly) are rewritten once on
-the first run with the current layout, so expect `UpdatedFiles > 0` for that
-migration run. The immediate rerun must return to `UpdatedFiles : 0`.
+linked the root anchors directly) are rewritten once on the first run with the
+current layout, so expect `UpdatedFiles > 0` for that migration run. The
+immediate rerun must return to `UpdatedFiles : 0`.
+
+Vaults generated under the previous naming layout also leave stale generated
+files behind after the rename to the current `coverage-shard` / `graph-network-root`
+names and the auto-derived lane hubs. Run the updater once with `-PruneStale` to
+archive those stale files and restore the guarantee.
 
 For a fresh operator or agent, use the copy-ready prompt in:
 
 ```text
-tools\obsidian-fde-graph-network-prompt.md
+tools\obsidian-graph-network-generic-windows-prompt.md
 ```
 
 ## Test
@@ -58,7 +63,7 @@ The test harness covers:
 
 - Normal generation
 - Idempotent second run
-- Exactly two FDE coverage shard edges per covered note
+- Exactly two coverage shard edges per covered note
 - Single connected wikilink component across all generated network files
   (auto 8-shard ring and explicit `-BucketCount 17`)
 - Coverage shards never link the root anchors directly, and root anchor
@@ -77,7 +82,7 @@ The test harness covers:
 
 ## Contract Module
 
-Keep shared FDE graph-network constants and helpers in:
+Keep shared graph-network constants and helpers in:
 
 ```text
 tools\obsidian-graph-network-lib.ps1
@@ -109,7 +114,11 @@ If any of these are false, treat the update as failed and do not trust the graph
 
 - Notes are not edited.
 - `_graph-network` stays flat; no nested generated folders.
-- Every covered Markdown note gets exactly two FDE coverage shard links.
+- Every covered Markdown note gets exactly two coverage shard links.
+- Lane hubs are derived from the vault's own top-level folders, one hub per
+  distinct folder (`hub-lane--<slug>.md`); the taxonomy is never hard-coded.
+  Notes that sit directly in the vault root have no top-level folder and are
+  collected by the intake hub (`hub-intake--unclassified.md`).
 - Coverage shards link only the previous shard, the next shard, and their lane
   hub; shards do not link the root anchors directly (degree reduction). Root
   anchors reach the shard ring through the lane hubs and the single ring entry
@@ -117,7 +126,7 @@ If any of these are false, treat the update as failed and do not trust the graph
 - All generated `_graph-network` files form a single connected wikilink
   component; the updater fails the run when this is violated and the test
   harness re-verifies it with a BFS over the parsed `[[...]]` links.
-- Obsidian graph color groups stay enabled for FDE anchors, lane hubs, and coverage shards.
+- Obsidian graph color groups stay enabled for the root anchors, lane hubs, and coverage shards.
 - `_graph-network` is for Obsidian graph connectivity only and must stay excluded from Smart Connections.
 - No background watcher or scheduled job is used.
 
@@ -125,7 +134,6 @@ If any of these are false, treat the update as failed and do not trust the graph
 
 - Keep updates manual/lightweight; do not add a watcher or scheduled job unless the performance model is redesigned.
 - Keep `_graph-network` excluded from Smart Connections so generated coverage links do not become embedding input.
-- Keep Obsidian graph configured with orphans hidden, unresolved links hidden, and FDE graph color groups enabled.
-- Never reframe the generated network as a generic bridge network; the generated coverage nodes are FDE coverage shards.
+- Keep Obsidian graph configured with orphans hidden, unresolved links hidden, and the graph color groups enabled.
 - If Smart Connections is slow after large vault changes, prefer excluding heavy folders and disabling block embeddings before resetting data.
 - If Smart data must be reset, do it intentionally when the machine can sit idle; re-import is expected to be intensive on large vaults.

@@ -55,6 +55,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\update-obsidian-graph-
 
 即時 rerun では `UpdatedFiles : 0` と `GraphSettingsUpdated : False` が期待値です。
 
+## 命名と移行
+
+生成物の命名は汎用化されています。coverage shard は `coverage-shard-NN.md`、root anchor は `graph-network-root.md`、lane hub は vault の top-level フォルダから自動導出します (`hub-lane--<folder>.md` と、フォルダを持たない note 用の `hub-intake--unclassified.md`)。lane の分類はハードコードせず、対象 vault の実際のフォルダ構成に追従します。
+
+旧レイアウトで生成した vault では、この命名変更後に旧名の生成ファイルが stale として残ることがあります。その場合は updater を一度だけ `-PruneStale` 付きで実行し、stale ファイルを archive してから guarantee を再確認してください。
+
 ## 公開ステータス
 
 この repository は 2026-07-04 に repository-specific approval を得て公開済みです (記録: [PUBLIC_READY.md](PUBLIC_READY.md))。repository visibility change、announcement、broad sharing には、引き続き明示的な human review と approval が必要です。

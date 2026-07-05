@@ -118,6 +118,47 @@ function New-SmallTestVault {
   return $root
 }
 
+function New-FolderedTestVault {
+  # Vault with a controlled number of distinct top-level folders, used to prove
+  # the dynamic lane taxonomy derives one hub per top folder and keeps the
+  # generated network a single connected component regardless of folder count.
+  param(
+    [int]$FolderCount = 1,
+    [int]$NotesPerFolder = 2,
+    [switch]$IncludeRootNote
+  )
+
+  $root = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-folders-test-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $root '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $root '.smart-env') | Out-Null
+
+  @{
+    showOrphans = $false
+    hideUnresolved = $true
+    showAttachments = $false
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.obsidian\graph.json')
+
+  @{
+    smart_sources = @{
+      folder_exclusions = '.obsidian,.smart-env,_graph-network'
+    }
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.smart-env\smart_env.json')
+
+  for ($f = 1; $f -le $FolderCount; $f++) {
+    $folder = 'folder-{0:D2}' -f $f
+    New-Item -ItemType Directory -Force -Path (Join-Path $root $folder) | Out-Null
+    for ($n = 1; $n -le $NotesPerFolder; $n++) {
+      Set-TestFileUtf8 -Path (Join-Path $root ('{0}\note-{1}.md' -f $folder, $n)) -Content ('# {0} note {1}' -f $folder, $n)
+    }
+  }
+
+  if ($IncludeRootNote) {
+    Set-TestFileUtf8 -Path (Join-Path $root 'root-level-note.md') -Content '# Root level note'
+  }
+
+  return $root
+}
+
 function Invoke-NetworkScript {
   param(
     [string]$Vault,
@@ -142,10 +183,10 @@ function Get-LastResult {
 function Get-NoteEdgeCounts {
   param([string]$Vault)
 
-  $network = Get-FdeGraphNetworkPath -Vault $Vault
+  $network = Get-GraphNetGraphNetworkPath -Vault $Vault
   $counts = @{}
 
-  Get-ChildItem -LiteralPath $network -Filter "$script:FdeCoverageShardPrefix-*.md" -File | ForEach-Object {
+  Get-ChildItem -LiteralPath $network -Filter "$script:GraphNetCoverageShardPrefix-*.md" -File | ForEach-Object {
     Select-String -LiteralPath $_.FullName -Pattern '^- \[\[(.+?)(?:\|.*?)?\]\]$' | ForEach-Object {
       $target = $_.Matches[0].Groups[1].Value
       if ($target -notlike '_graph-network/*') {
@@ -165,12 +206,23 @@ function Get-ExpectedNoteTargets {
 
   $targets = [System.Collections.Generic.List[string]]::new()
   Get-ChildItem -LiteralPath $Vault -Recurse -Force -Filter '*.md' -File |
-    Where-Object { Test-FdeCoveredNotePath -Path $_.FullName -Vault $Vault } |
+    Where-Object { Test-GraphNetCoveredNotePath -Path $_.FullName -Vault $Vault } |
     ForEach-Object {
-      $targets.Add((ConvertTo-FdeWikiTarget -Path $_.FullName -Vault $Vault))
+      $targets.Add((ConvertTo-GraphNetWikiTarget -Path $_.FullName -Vault $Vault))
     }
 
   return @($targets | Sort-Object)
+}
+
+function Get-ExpectedLaneDefinitions {
+  # Recompute the dynamic lane model the same way the updater does, so tests can
+  # assert against the top-folder-derived hubs without hard-coding any lane name.
+  param([string]$Vault)
+
+  $resolved = (Resolve-Path -LiteralPath $Vault).Path
+  $notes = @(Get-GraphNetCoveredNoteFiles -Vault $resolved)
+  $tops = @($notes | ForEach-Object { Get-GraphNetTopFolder -Path $_.FullName -Vault $resolved })
+  return @(Get-GraphNetLaneDefinitions -TopFolders $tops)
 }
 
 function Get-NoteHashes {
@@ -197,6 +249,8 @@ try {
   $expectedTargets = Get-ExpectedNoteTargets -Vault $vault
   $actualTargets = @($counts.Keys | Sort-Object)
   $targetDiffs = @(Compare-Object $expectedTargets $actualTargets)
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
+  $expectedLanes = Get-ExpectedLaneDefinitions -Vault $vault
 
   Add-TestResult 'normal run reports guarantee ok' ($first.GuaranteeOk -eq $true) ($first | Out-String)
   Add-TestResult 'second run is idempotent' ($second.UpdatedFiles -eq 0) ($second | Out-String)
@@ -205,21 +259,35 @@ try {
   Add-TestResult 'covered targets do not keep markdown trailing dots' (($counts.ContainsKey('root-note')) -and (-not $counts.ContainsKey('root-note.'))) (($counts.Keys | Sort-Object) -join ', ')
   Add-TestResult 'update output reports no unresolved targets' (($first.MissingTargets -eq 0) -and ($first.UnresolvedTargets -eq 0) -and ($first.TrailingDotTargets -eq 0)) ($first | Out-String)
   Add-TestResult 'explicit bucket count is honored' (($first.BucketCount -eq 8) -and ($first.BucketCountUsed -eq 8) -and ($first.GeneratedCoverageShardFiles -eq 8)) ($first | Out-String)
-  $expectedShard00 = '{0}-00.md' -f $script:FdeCoverageShardPrefix
-  Add-TestResult 'coverage shards use FDE names' ((Test-Path -LiteralPath (Join-Path (Get-FdeGraphNetworkPath -Vault $vault) $expectedShard00)) -and (-not (Test-Path -LiteralPath (Join-Path (Get-FdeGraphNetworkPath -Vault $vault) 'bridge-00.md')))) "expected $expectedShard00 and no bridge-00.md"
-  $requiredNetworkFiles = @(
-    'FDE-NETWORK.md',
-    'NETWORK-GUARANTEE.md',
-    'hub-intake--unclassified.md',
-    'hub-lane--capture-log.md',
-    'hub-lane--decision-system.md',
-    'hub-lane--evidence-research.md',
-    'hub-lane--execution.md',
-    'hub-lane--identity-strategy.md',
-    'hub-lane--other.md'
-  )
-  $missingNetworkFiles = @($requiredNetworkFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path (Get-FdeGraphNetworkPath -Vault $vault) $_)) })
-  Add-TestResult 'required FDE anchors and lane hubs exist' ($missingNetworkFiles.Count -eq 0) ($missingNetworkFiles -join ', ')
+  $expectedShard00 = '{0}-00.md' -f $script:GraphNetCoverageShardPrefix
+  # The retired project acronym, assembled from character codes so this test file
+  # never contains it literally (keeping the whole tools tree grep-clean). Reused
+  # for the legacy shard-name guard and the generated-output acronym scan below.
+  $forbidden = -join [char[]](102, 100, 101)
+  $legacyShard00 = '{0}-coverage-shard-00.md' -f $forbidden
+  Add-TestResult 'coverage shards use neutral names' ((Test-Path -LiteralPath (Join-Path $network $expectedShard00)) -and (-not (Test-Path -LiteralPath (Join-Path $network $legacyShard00))) -and (-not (Test-Path -LiteralPath (Join-Path $network 'bridge-00.md')))) "expected $expectedShard00 and no legacy shard names"
+
+  # Dynamic lane taxonomy: the generated hub-lane-- files must equal exactly one
+  # per distinct top-level folder of the covered notes, and the intake hub plus
+  # the two root anchors must exist.
+  $expectedLaneHubFiles = @($expectedLanes | Where-Object { $_.Hub -like 'hub-lane--*' } | ForEach-Object { ('{0}.md' -f $_.Hub) } | Sort-Object)
+  $actualLaneHubFiles = @(Get-ChildItem -LiteralPath $network -Filter 'hub-lane--*.md' -File | ForEach-Object { $_.Name } | Sort-Object)
+  $laneHubDiffs = @(Compare-Object $expectedLaneHubFiles $actualLaneHubFiles)
+  Add-TestResult 'generated lane hubs match the vault top-level folders exactly' ($laneHubDiffs.Count -eq 0) ("expected=" + ($expectedLaneHubFiles -join ', ') + " actual=" + ($actualLaneHubFiles -join ', '))
+
+  $expectedFolderTops = @(Get-ExpectedNoteTargets -Vault $vault | Where-Object { $_ -like '*/*' } | ForEach-Object { ($_ -split '/')[0] } | Sort-Object -Unique)
+  $laneHubTitles = @($expectedLanes | Where-Object { $_.Hub -like 'hub-lane--*' } | ForEach-Object { $_.Title } | Sort-Object -Unique)
+  $titleDiffs = @(Compare-Object $expectedFolderTops $laneHubTitles)
+  Add-TestResult 'lane hub titles are the raw top folder names' ($titleDiffs.Count -eq 0) ("folders=" + ($expectedFolderTops -join ', ') + " titles=" + ($laneHubTitles -join ', '))
+
+  $requiredNetworkFiles = @('graph-network-root.md', 'NETWORK-GUARANTEE.md', 'hub-intake--unclassified.md') + $expectedLaneHubFiles
+  $missingNetworkFiles = @($requiredNetworkFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $network $_)) })
+  Add-TestResult 'required anchors, intake hub, and dynamic lane hubs exist' ($missingNetworkFiles.Count -eq 0) ($missingNetworkFiles -join ', ')
+
+  # Vault-root notes are routed to the intake hub and stay part of the single
+  # connected component.
+  Add-TestResult 'vault-root notes route to intake hub inside the connected network' ((Test-Path -LiteralPath (Join-Path $network 'hub-intake--unclassified.md')) -and ($counts.ContainsKey('root-note')) -and ($first.NetworkConnectedComponents -eq 1)) ("intakeExists=" + (Test-Path -LiteralPath (Join-Path $network 'hub-intake--unclassified.md')) + " rootCovered=" + ($counts.ContainsKey('root-note')) + " components=" + $first.NetworkConnectedComponents)
+
   Add-TestResult 'every covered note has exactly two coverage shard edges' ((@($counts.Values | Where-Object { $_ -ne 2 }).Count) -eq 0) (($counts.GetEnumerator() | Sort-Object Name | Out-String))
   Add-TestResult 'system/cache/generated folders are excluded while archives stay covered' ((-not $counts.ContainsKey('_graph-network/manual')) -and (-not $counts.ContainsKey('.trash/deleted')) -and (-not $counts.ContainsKey('node_modules/pkg/README')) -and (-not $counts.ContainsKey('.pytest_cache/README')) -and ($counts.ContainsKey('archive/old')) -and ($counts.ContainsKey('work/.archive/old-case'))) (($counts.Keys | Sort-Object) -join ', ')
   Add-TestResult 'generated network stays flat' ((Get-ChildItem -LiteralPath (Join-Path $vault '_graph-network') -Directory -Force | Measure-Object).Count -eq 0) 'nested generated directories found'
@@ -234,15 +302,16 @@ try {
   Add-TestResult 'app ignore filters exclude cache surfaces but keep graph network visible' (($missingIgnoreFilters.Count -eq 0) -and (@($appConfig.userIgnoreFilters) -notcontains '**/archive/') -and (@($appConfig.userIgnoreFilters) -notcontains '_graph-network/')) (($appConfig | ConvertTo-Json -Depth 8) + [Environment]::NewLine + 'Missing: ' + ($missingIgnoreFilters -join ', '))
   Add-TestResult 'graph search filter excludes cache but not archive surfaces' (($graphConfig.search -match 'node_modules') -and ($graphConfig.search -match 'cache') -and ($graphConfig.search -notmatch 'archive')) $graphConfig.search
   $graphQueries = @($graphConfig.colorGroups | ForEach-Object { $_.query })
-  $missingGraphQueries = @(Get-RequiredFdeGraphColorQueries | Where-Object { $graphQueries -notcontains $_ })
-  Add-TestResult 'graph color groups cover FDE and top-level lanes' ((@($graphConfig.colorGroups).Count -ge 30) -and ($graphConfig.'collapse-color-groups' -eq $false) -and ($missingGraphQueries.Count -eq 0)) (($graphConfig | ConvertTo-Json -Depth 12) + [Environment]::NewLine + 'Missing: ' + ($missingGraphQueries -join ', '))
+  $requiredQueries = @(Get-RequiredGraphNetGraphColorQueries -LaneDefinitions $expectedLanes)
+  $missingGraphQueries = @($requiredQueries | Where-Object { $graphQueries -notcontains $_ })
+  Add-TestResult 'graph color groups cover anchors, shards, and dynamic lanes' ((@($graphConfig.colorGroups).Count -ge $requiredQueries.Count) -and ($graphConfig.'collapse-color-groups' -eq $false) -and ($missingGraphQueries.Count -eq 0)) (($graphConfig | ConvertTo-Json -Depth 12) + [Environment]::NewLine + 'Missing: ' + ($missingGraphQueries -join ', '))
   $generatedNetworkTargets = [System.Collections.Generic.HashSet[string]]::new()
-  Get-ChildItem -LiteralPath (Get-FdeGraphNetworkPath -Vault $vault) -Filter '*.md' -File | ForEach-Object {
+  Get-ChildItem -LiteralPath $network -Filter '*.md' -File | ForEach-Object {
     $target = '_graph-network/' + [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
     $null = $generatedNetworkTargets.Add($target)
   }
   $missingGeneratedTargets = [System.Collections.Generic.List[string]]::new()
-  Get-ChildItem -LiteralPath (Get-FdeGraphNetworkPath -Vault $vault) -Filter '*.md' -File | ForEach-Object {
+  Get-ChildItem -LiteralPath $network -Filter '*.md' -File | ForEach-Object {
     Select-String -LiteralPath $_.FullName -Pattern '\[\[(_graph-network/[^|\]]+)' | ForEach-Object {
       $target = $_.Matches[0].Groups[1].Value
       if (-not $generatedNetworkTargets.Contains($target)) {
@@ -250,7 +319,18 @@ try {
       }
     }
   }
-  Add-TestResult 'generated FDE network links resolve internally' (($missingGeneratedTargets | Select-Object -Unique).Count -eq 0) (($missingGeneratedTargets | Select-Object -Unique | Sort-Object) -join ', ')
+  Add-TestResult 'generated network links resolve internally' (($missingGeneratedTargets | Select-Object -Unique).Count -eq 0) (($missingGeneratedTargets | Select-Object -Unique | Sort-Object) -join ', ')
+
+  # Generated output must be free of the retired project acronym (reusing the
+  # $forbidden substring built from character codes above).
+  $acronymHits = @()
+  Get-ChildItem -LiteralPath $network -Filter '*.md' -File | ForEach-Object {
+    $text = [System.IO.File]::ReadAllText($_.FullName, [System.Text.UTF8Encoding]::new($false))
+    if ($text -match ('(?i)' + $forbidden)) {
+      $acronymHits += $_.Name
+    }
+  }
+  Add-TestResult 'generated output has no retired acronym' ($acronymHits.Count -eq 0) ($acronymHits -join ', ')
 } catch {
   Add-TestResult 'fixture normal/idempotent behavior' $false $_.Exception.Message
 } finally {
@@ -276,14 +356,57 @@ try {
 
 try {
   $vault = New-TestVault
-  $network = Get-FdeGraphNetworkPath -Vault $vault
-  $staleShard99 = '{0}-99.md' -f $script:FdeCoverageShardPrefix
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
+  $staleShard99 = '{0}-99.md' -f $script:GraphNetCoverageShardPrefix
   Set-TestFileUtf8 -Path (Join-Path $network 'bridge-99.md') -Content '# stale'
   Set-TestFileUtf8 -Path (Join-Path $network $staleShard99) -Content '# stale'
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8 -PruneStale)
   Add-TestResult 'prune stale legacy and shard files only when requested' (($result.StaleMoved -eq 2) -and (-not (Test-Path -LiteralPath (Join-Path $network 'bridge-99.md'))) -and (-not (Test-Path -LiteralPath (Join-Path $network $staleShard99)))) ($result | Out-String)
 } catch {
   Add-TestResult 'prune stale behavior' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # Migration from the previous naming layout: legacy generated files carry the
+  # network_generated marker under retired names (an old coverage shard prefix,
+  # the old root anchor, and a hub that no longer matches the derived lane
+  # model). A plain rerun must fail loudly on them, and a single -PruneStale run
+  # must archive every legacy file and restore the guarantee. The retired
+  # acronym is assembled from character codes so this file stays grep-clean.
+  $vault = New-TestVault
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
+  $forbidden = -join [char[]](102, 100, 101)
+  $legacyMarker = @(
+    '---',
+    'network_generated: true',
+    'network_role: coverage_shard',
+    '---',
+    '',
+    '# legacy generated file'
+  ) -join [Environment]::NewLine
+  for ($i = 0; $i -lt 8; $i++) {
+    Set-TestFileUtf8 -Path (Join-Path $network ('{0}-coverage-shard-{1:D2}.md' -f $forbidden, $i)) -Content $legacyMarker
+  }
+  Set-TestFileUtf8 -Path (Join-Path $network ('{0}-NETWORK.md' -f $forbidden.ToUpperInvariant())) -Content $legacyMarker
+  Set-TestFileUtf8 -Path (Join-Path $network 'hub-lane--legacy-removed.md') -Content $legacyMarker
+
+  $plainFailed = $false
+  try {
+    $null = Invoke-NetworkScript -Vault $vault -BucketCount 8
+  } catch {
+    $plainFailed = $_.Exception.Message -match 'Stale generated network files'
+  }
+  Add-TestResult 'legacy-named generated files fail a plain rerun without prune' $plainFailed 'plain rerun did not reject legacy-named generated files'
+
+  $migrated = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8 -PruneStale)
+  $legacyRemaining = @(Get-ChildItem -LiteralPath $network -Filter '*.md' -File | Where-Object { $_.Name -match ('(?i)' + $forbidden) })
+  Add-TestResult 'prune archives legacy-named files and restores the guarantee' (($migrated.GuaranteeOk -eq $true) -and ($migrated.StaleMoved -eq 10) -and ($legacyRemaining.Count -eq 0)) ($migrated | Out-String)
+} catch {
+  Add-TestResult 'legacy layout migration path' $false $_.Exception.Message
 } finally {
   if ($vault -and (Test-Path -LiteralPath $vault)) {
     Remove-Item -LiteralPath $vault -Recurse -Force
@@ -341,9 +464,11 @@ try {
 try {
   $vault = New-TestVault
   '{"showOrphans":true,"hideUnresolved":false,"colorGroups":[]}' | Set-TestFileUtf8 -Path (Join-Path $vault '.obsidian\graph.json')
+  $expectedLanes = Get-ExpectedLaneDefinitions -Vault $vault
+  $requiredCount = @(Get-RequiredGraphNetGraphColorQueries -LaneDefinitions $expectedLanes).Count
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
   $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-  Add-TestResult 'bad graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge 30) -and ($result.MissingGraphColorGroups -eq 0)) ($graphConfig | ConvertTo-Json -Depth 12)
+  Add-TestResult 'bad graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge $requiredCount) -and ($result.MissingGraphColorGroups -eq 0)) ($graphConfig | ConvertTo-Json -Depth 12)
 } catch {
   Add-TestResult 'bad graph setting failure path' $false $_.Exception.Message
 } finally {
@@ -355,9 +480,11 @@ try {
 try {
   $vault = New-TestVault
   [System.IO.File]::WriteAllText((Join-Path $vault '.obsidian\graph.json'), '', [System.Text.UTF8Encoding]::new($false))
+  $expectedLanes = Get-ExpectedLaneDefinitions -Vault $vault
+  $requiredCount = @(Get-RequiredGraphNetGraphColorQueries -LaneDefinitions $expectedLanes).Count
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
   $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-  Add-TestResult 'empty graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge 30)) ($graphConfig | ConvertTo-Json -Depth 12)
+  Add-TestResult 'empty graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge $requiredCount)) ($graphConfig | ConvertTo-Json -Depth 12)
 } catch {
   Add-TestResult 'empty graph setting failure path' $false $_.Exception.Message
 } finally {
@@ -425,10 +552,10 @@ try {
     [pscustomobject]@{ Top = 'zeta' },
     [pscustomobject]@{ Top = 'alpha' }
   )
-  $tieResultA = Get-FdeDominantTop -Items $tieForward
-  $tieResultB = Get-FdeDominantTop -Items $tieReversed
-  $majorityResult = Get-FdeDominantTop -Items $majority
-  $emptyResult = Get-FdeDominantTop -Items @()
+  $tieResultA = Get-GraphNetDominantTop -Items $tieForward
+  $tieResultB = Get-GraphNetDominantTop -Items $tieReversed
+  $majorityResult = Get-GraphNetDominantTop -Items $majority
+  $emptyResult = Get-GraphNetDominantTop -Items @()
   Add-TestResult 'dominant top tie-break resolves by ascending name' (($tieResultA -eq 'alpha') -and ($tieResultB -eq 'alpha') -and ($majorityResult -eq 'zeta') -and ($emptyResult -eq '')) "tieA=$tieResultA tieB=$tieResultB majority=$majorityResult empty=$emptyResult"
 } catch {
   Add-TestResult 'dominant top tie-break path' $false $_.Exception.Message
@@ -438,7 +565,7 @@ try {
   $allDistinct = $true
   $collisionIndex = -1
   for ($i = 0; $i -lt 200; $i++) {
-    $pair = Get-FdeStableBuckets -Target ('inbox/generated-note-{0}' -f $i) -Count 17
+    $pair = Get-GraphNetStableBuckets -Target ('inbox/generated-note-{0}' -f $i) -Count 17
     if ($pair[0] -eq $pair[1]) {
       $allDistinct = $false
       $collisionIndex = $i
@@ -446,21 +573,34 @@ try {
     }
   }
   Add-TestResult 'stable buckets stay distinct for bucket count 17' $allDistinct "same bucket pair at index $collisionIndex"
-  $repeatA = Get-FdeStableBuckets -Target 'work/stable-target' -Count 17
-  $repeatB = Get-FdeStableBuckets -Target 'work/stable-target' -Count 17
+  $repeatA = Get-GraphNetStableBuckets -Target 'work/stable-target' -Count 17
+  $repeatB = Get-GraphNetStableBuckets -Target 'work/stable-target' -Count 17
   Add-TestResult 'stable buckets are deterministic' (($repeatA[0] -eq $repeatB[0]) -and ($repeatA[1] -eq $repeatB[1])) "repeatA=$($repeatA -join ',') repeatB=$($repeatB -join ',')"
 } catch {
   Add-TestResult 'stable bucket collision path' $false $_.Exception.Message
 }
 
 try {
-  $autoTiny = Get-FdeAutoBucketCount -CoveredNoteCount 4
-  $autoZero = Get-FdeAutoBucketCount -CoveredNoteCount 0
-  $autoMid = Get-FdeAutoBucketCount -CoveredNoteCount 200
-  $autoLarge = Get-FdeAutoBucketCount -CoveredNoteCount 5000
+  $autoTiny = Get-GraphNetAutoBucketCount -CoveredNoteCount 4
+  $autoZero = Get-GraphNetAutoBucketCount -CoveredNoteCount 0
+  $autoMid = Get-GraphNetAutoBucketCount -CoveredNoteCount 200
+  $autoLarge = Get-GraphNetAutoBucketCount -CoveredNoteCount 5000
   Add-TestResult 'auto bucket count clamps between 8 and 64' (($autoTiny -eq 8) -and ($autoZero -eq 8) -and ($autoMid -eq 13) -and ($autoLarge -eq 64)) "tiny=$autoTiny zero=$autoZero mid=$autoMid large=$autoLarge"
 } catch {
   Add-TestResult 'auto bucket count formula path' $false $_.Exception.Message
+}
+
+try {
+  # Slug derivation is deterministic, file-name safe, and resolves collisions in
+  # favor of the alphabetically earlier original folder name.
+  $slugPlain = ConvertTo-GraphNetHubSlug -Folder 'Dev-Log'
+  $slugSpaces = ConvertTo-GraphNetHubSlug -Folder 'My Notes!!'
+  $slugUnderscore = ConvertTo-GraphNetHubSlug -Folder 'nexus_ai'
+  $collisionLanes = @(Get-GraphNetLaneDefinitions -TopFolders @('a-b', 'a.b'))
+  $collisionHubs = @($collisionLanes | Where-Object { $_.Hub -like 'hub-lane--*' } | ForEach-Object { $_.Hub })
+  Add-TestResult 'hub slug is deterministic, safe, and collision-resistant' (($slugPlain -eq 'dev-log') -and ($slugSpaces -eq 'my-notes') -and ($slugUnderscore -eq 'nexus-ai') -and ($collisionHubs -contains 'hub-lane--a-b') -and ($collisionHubs -contains 'hub-lane--a-b-2')) "plain=$slugPlain spaces=$slugSpaces underscore=$slugUnderscore collision=$($collisionHubs -join ',')"
+} catch {
+  Add-TestResult 'hub slug derivation path' $false $_.Exception.Message
 }
 
 try {
@@ -480,7 +620,7 @@ try {
   $archiveRoot = Join-Path $vault '_archive-outside-network'
   $auto = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot)
   $autoRerun = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot)
-  $shardFiles = @(Get-ChildItem -LiteralPath (Get-FdeGraphNetworkPath -Vault $vault) -Filter ('{0}-*.md' -f $script:FdeCoverageShardPrefix) -File)
+  $shardFiles = @(Get-ChildItem -LiteralPath (Get-GraphNetGraphNetworkPath -Vault $vault) -Filter ('{0}-*.md' -f $script:GraphNetCoverageShardPrefix) -File)
   Add-TestResult 'auto bucket count sizes small vault to 8 shards' (($auto.BucketCount -eq 0) -and ($auto.BucketCountUsed -eq 8) -and ($shardFiles.Count -eq 8) -and ($auto.CoveredNotes -eq 4) -and ($auto.GuaranteeOk -eq $true)) ($auto | Out-String)
   Add-TestResult 'auto bucket count rerun is idempotent' (($autoRerun.UpdatedFiles -eq 0) -and ($autoRerun.BucketCountUsed -eq 8)) ($autoRerun | Out-String)
 } catch {
@@ -496,17 +636,17 @@ try {
   # must not report a guarantee while higher-numbered shards stay on disk.
   $vault = New-SmallTestVault -NoteCount 20
   $archiveRoot = Join-Path $vault '_archive-outside-network'
-  $network = Get-FdeGraphNetworkPath -Vault $vault
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
   $wide = Get-LastResult -Output (& $ScriptPath -Vault $vault -BucketCount 13 -ArchiveRoot $archiveRoot)
   $shrinkFailed = $false
   try {
     $null = & $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot
   } catch {
-    $shrinkFailed = $_.Exception.Message -match 'Stale FDE coverage shard files'
+    $shrinkFailed = $_.Exception.Message -match 'Stale generated network files'
   }
   Add-TestResult 'auto shrink with stale shards on disk fails clearly' (($wide.BucketCountUsed -eq 13) -and $shrinkFailed) 'script did not reject stale on-disk coverage shards after auto shrink'
   $pruned = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot -PruneStale)
-  $shardFiles = @(Get-ChildItem -LiteralPath $network -Filter ('{0}-*.md' -f $script:FdeCoverageShardPrefix) -File)
+  $shardFiles = @(Get-ChildItem -LiteralPath $network -Filter ('{0}-*.md' -f $script:GraphNetCoverageShardPrefix) -File)
   Add-TestResult 'auto shrink with prune archives stale shards and restores guarantee' (($pruned.BucketCountUsed -eq 8) -and ($pruned.StaleMoved -eq 5) -and ($shardFiles.Count -eq 8) -and ($pruned.GuaranteeOk -eq $true)) ($pruned | Out-String)
 } catch {
   Add-TestResult 'auto shrink stale shard behavior' $false $_.Exception.Message
@@ -524,10 +664,46 @@ try {
   $vault = New-SmallTestVault -NoteCount 4
   $archiveRoot = Join-Path $vault '_archive-outside-network'
   $auto = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot)
-  $components = Get-FdeNetworkConnectedComponentCount -NetworkPath (Get-FdeGraphNetworkPath -Vault $vault)
+  $components = Get-GraphNetNetworkConnectedComponentCount -NetworkPath (Get-GraphNetGraphNetworkPath -Vault $vault)
   Add-TestResult 'auto 8-shard network forms a single connected component' (($auto.BucketCountUsed -eq 8) -and ($components -eq 1) -and ($auto.NetworkConnectedComponents -eq 1)) "bucketCountUsed=$($auto.BucketCountUsed) components=$components reported=$($auto.NetworkConnectedComponents)"
 } catch {
   Add-TestResult 'auto 8-shard connectivity path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # Single top-folder vault: the taxonomy still yields one lane hub plus intake,
+  # and the generated network stays a single connected component.
+  $vault = New-FolderedTestVault -FolderCount 1 -NotesPerFolder 2
+  $archiveRoot = Join-Path $vault '_archive-outside-network'
+  $result = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot)
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
+  $components = Get-GraphNetNetworkConnectedComponentCount -NetworkPath $network
+  $laneHubFiles = @(Get-ChildItem -LiteralPath $network -Filter 'hub-lane--*.md' -File)
+  Add-TestResult 'single top-folder vault stays a single connected component' (($result.GuaranteeOk -eq $true) -and ($components -eq 1) -and ($result.NetworkConnectedComponents -eq 1) -and ($laneHubFiles.Count -eq 1)) "components=$components laneHubs=$($laneHubFiles.Count)"
+} catch {
+  Add-TestResult 'single top-folder connectivity path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # Many top-folder vault (12 folders): one lane hub per folder and connectivity
+  # is still a single component. Uses auto bucket sizing.
+  $vault = New-FolderedTestVault -FolderCount 12 -NotesPerFolder 2 -IncludeRootNote
+  $archiveRoot = Join-Path $vault '_archive-outside-network'
+  $result = Get-LastResult -Output (& $ScriptPath -Vault $vault -ArchiveRoot $archiveRoot)
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
+  $components = Get-GraphNetNetworkConnectedComponentCount -NetworkPath $network
+  $laneHubFiles = @(Get-ChildItem -LiteralPath $network -Filter 'hub-lane--*.md' -File)
+  Add-TestResult 'twelve top-folder vault yields one hub per folder and one component' (($result.GuaranteeOk -eq $true) -and ($components -eq 1) -and ($result.NetworkConnectedComponents -eq 1) -and ($laneHubFiles.Count -eq 12) -and (Test-Path -LiteralPath (Join-Path $network 'hub-intake--unclassified.md'))) "components=$components laneHubs=$($laneHubFiles.Count)"
+} catch {
+  Add-TestResult 'twelve top-folder connectivity path' $false $_.Exception.Message
 } finally {
   if ($vault -and (Test-Path -LiteralPath $vault)) {
     Remove-Item -LiteralPath $vault -Recurse -Force
@@ -541,21 +717,21 @@ try {
   # with the 17 shards.
   $vault = New-TestVault
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 17)
-  $network = Get-FdeGraphNetworkPath -Vault $vault
-  $components = Get-FdeNetworkConnectedComponentCount -NetworkPath $network
-  $adjacency = Get-FdeNetworkAdjacency -NetworkPath $network
-  $rootDegree = $adjacency['_graph-network/FDE-NETWORK'].Count
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
+  $components = Get-GraphNetNetworkConnectedComponentCount -NetworkPath $network
+  $adjacency = Get-GraphNetNetworkAdjacency -NetworkPath $network
+  $rootDegree = $adjacency['_graph-network/graph-network-root'].Count
   $guaranteeDegree = $adjacency['_graph-network/NETWORK-GUARANTEE'].Count
   $shardsLinkingRoots = 0
-  Get-ChildItem -LiteralPath $network -Filter ('{0}-*.md' -f $script:FdeCoverageShardPrefix) -File | ForEach-Object {
+  Get-ChildItem -LiteralPath $network -Filter ('{0}-*.md' -f $script:GraphNetCoverageShardPrefix) -File | ForEach-Object {
     $content = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8
-    if (($content -match '\[\[_graph-network/FDE-NETWORK') -or ($content -match '\[\[_graph-network/NETWORK-GUARANTEE')) {
+    if (($content -match '\[\[_graph-network/graph-network-root') -or ($content -match '\[\[_graph-network/NETWORK-GUARANTEE')) {
       $shardsLinkingRoots++
     }
   }
   Add-TestResult 'bucket count 17 network forms a single connected component' (($result.BucketCountUsed -eq 17) -and ($components -eq 1) -and ($result.NetworkConnectedComponents -eq 1)) "bucketCountUsed=$($result.BucketCountUsed) components=$components reported=$($result.NetworkConnectedComponents)"
   Add-TestResult 'coverage shards do not link root anchors directly' ($shardsLinkingRoots -eq 0) "shards linking roots=$shardsLinkingRoots"
-  Add-TestResult 'root anchor degree stays bounded by lane hub count' (($rootDegree -le 10) -and ($guaranteeDegree -le 10)) "fdeNetworkDegree=$rootDegree networkGuaranteeDegree=$guaranteeDegree"
+  Add-TestResult 'root anchor degree stays bounded by lane hub count' (($rootDegree -le 10) -and ($guaranteeDegree -le 10)) "rootDegree=$rootDegree guaranteeDegree=$guaranteeDegree"
 } catch {
   Add-TestResult 'bucket count 17 connectivity path' $false $_.Exception.Message
 } finally {
@@ -569,11 +745,11 @@ try {
   # splits the generated wikilink graph, so the updater must refuse to
   # report a guarantee instead of shipping a disconnected island.
   $vault = New-TestVault
-  $network = Get-FdeGraphNetworkPath -Vault $vault
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
   $islandLines = @(
     '---',
     'network_generated: true',
-    'network_role: fde_lane_hub',
+    'network_role: lane_hub',
     'hub: island',
     '---',
     '',
@@ -602,7 +778,7 @@ try {
   # (node_modules, .git, __pycache__, a cache folder, .obsidian) must leave
   # the covered note set unchanged, and the pruning walk must return exactly
   # the same files as a full recursive scan filtered by
-  # Test-FdeCoveredNotePath.
+  # Test-GraphNetCoveredNotePath.
   $vault = New-TestVault
   $plantedNotes = @(
     'node_modules\pkg\dist\docs\excluded-dependency-doc.md',
@@ -617,9 +793,9 @@ try {
     Set-TestFileUtf8 -Path $notePath -Content '# planted excluded note'
   }
   $resolvedVault = (Resolve-Path -LiteralPath $vault).Path
-  $prunedPaths = @(Get-FdeCoveredNoteFiles -Vault $resolvedVault | ForEach-Object { $_.FullName })
+  $prunedPaths = @(Get-GraphNetCoveredNoteFiles -Vault $resolvedVault | ForEach-Object { $_.FullName })
   $fullScanPaths = @(Get-ChildItem -LiteralPath $resolvedVault -Recurse -Force -Filter '*.md' -File |
-    Where-Object { Test-FdeCoveredNotePath -Path $_.FullName -Vault $resolvedVault } |
+    Where-Object { Test-GraphNetCoveredNotePath -Path $_.FullName -Vault $resolvedVault } |
     Sort-Object FullName |
     ForEach-Object { $_.FullName })
   $walkDiffs = @(Compare-Object $prunedPaths $fullScanPaths)
