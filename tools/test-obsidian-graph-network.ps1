@@ -60,6 +60,8 @@ try {
 
 try {
   $safetySource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'public-safety-scan.ps1') -Raw
+  $nonAsciiSafetySource = [regex]::Matches($safetySource, '[^\x00-\x7F]')
+  Add-TestResult 'public safety scan source is ASCII for locale-independent PowerShell 5.1 parsing' ($nonAsciiSafetySource.Count -eq 0) ("nonAsciiCharacters={0}" -f $nonAsciiSafetySource.Count)
   $secretPatternText = [regex]::Match($safetySource, '(?m)^\s*\$secretPattern\s*=\s*''((?:''''|[^''])*)''').Groups[1].Value.Replace("''", "'")
   $personalPathPatternText = [regex]::Match($safetySource, '(?m)^\s*\$personalPathPattern\s*=\s*''((?:''''|[^''])*)''').Groups[1].Value.Replace("''", "'")
   $jsonSecretFixture = ('{"api_' + 'key": "abcdefghijklmnopqrstuv"}')

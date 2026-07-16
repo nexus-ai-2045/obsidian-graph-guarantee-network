@@ -16,7 +16,9 @@ try {
   # Do not hard-code personal identifiers (macOS usernames or private email addresses).
   # Detect generic path tokens instead. Cloud-sync names are scoped to a path separator
   # so prose that merely mentions Dropbox or OneDrive does not become a false positive.
-  $personalPathPattern = '((^|[^A-Za-z0-9_])(C:\\Users\\|D:\\)|/Users/|-Users-|[\\/](Dropbox|OneDrive)|MyDocuments|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|__Eマンガ|成年|DL版|torrent|DMM)'
+  # Keep this source ASCII-only: Windows PowerShell 5.1 decodes UTF-8 without BOM
+  # using the active system code page. Unicode safety terms stay equivalent via escapes.
+  $personalPathPattern = '((^|[^A-Za-z0-9_])(C:\\Users\\|D:\\)|/Users/|-Users-|[\\/](Dropbox|OneDrive)|MyDocuments|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|__E\u30de\u30f3\u30ac|\u6210\u5e74|DL\u7248|torrent|DMM)'
 
   $secretMatches = @(rg --hidden -n -i $secretPattern . --glob '!.git/**' --glob '!d-drive-*.csv' --glob '!mydocuments-top-folder-summary.csv' --glob '!tools/public-safety-scan.ps1' 2>$null)
   if ($LASTEXITCODE -gt 1) {
