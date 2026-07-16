@@ -44,6 +44,34 @@ function Set-TestFileUtf8 {
   }
 }
 
+try {
+  $safetyScriptPath = Join-Path $PSScriptRoot 'public-safety-scan.ps1'
+  $parseTokens = $null
+  $parseErrors = $null
+  [System.Management.Automation.Language.Parser]::ParseFile(
+    $safetyScriptPath,
+    [ref]$parseTokens,
+    [ref]$parseErrors
+  ) | Out-Null
+  Add-TestResult 'public safety scan parses under Windows PowerShell 5.1' ($parseErrors.Count -eq 0) (($parseErrors | ForEach-Object Message) -join [Environment]::NewLine)
+} catch {
+  Add-TestResult 'public safety scan Windows PowerShell 5.1 parse path' $false $_.Exception.Message
+}
+
+try {
+  $safetySource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'public-safety-scan.ps1') -Raw
+  $nonAsciiSafetySource = [regex]::Matches($safetySource, '[^\x00-\x7F]')
+  Add-TestResult 'public safety scan source is ASCII for locale-independent PowerShell 5.1 parsing' ($nonAsciiSafetySource.Count -eq 0) ("nonAsciiCharacters={0}" -f $nonAsciiSafetySource.Count)
+  $secretPatternText = [regex]::Match($safetySource, '(?m)^\s*\$secretPattern\s*=\s*''((?:''''|[^''])*)''').Groups[1].Value.Replace("''", "'")
+  $personalPathPatternText = [regex]::Match($safetySource, '(?m)^\s*\$personalPathPattern\s*=\s*''((?:''''|[^''])*)''').Groups[1].Value.Replace("''", "'")
+  $jsonSecretFixture = ('{"api_' + 'key": "abcdefghijklmnopqrstuv"}')
+  $lowercaseWindowsPathFixture = ('c:' + '\users\alice\vault')
+  Add-TestResult 'public safety scan detects quoted JSON secrets' ($jsonSecretFixture -match $secretPatternText) $secretPatternText
+  Add-TestResult 'public safety scan detects lowercase Windows user paths' ($lowercaseWindowsPathFixture -match "(?i)$personalPathPatternText") $personalPathPatternText
+} catch {
+  Add-TestResult 'public safety scan pattern regression path' $false $_.Exception.Message
+}
+
 function New-TestVault {
   $root = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-test-' + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $root | Out-Null

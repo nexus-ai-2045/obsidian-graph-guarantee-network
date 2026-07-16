@@ -25,8 +25,8 @@ jobs:
       # 各 case 終了時に削除する (repo 内には書き込まない)。
       # そのため直後の verify にある git worktree clean チェックとこの順序で両立する。
       - name: Run test harness
-        run: pwsh -NoProfile -File tools/test-obsidian-graph-network.ps1
+        run: powershell -NoProfile -File tools/test-obsidian-graph-network.ps1
 
       # verify は失敗時に Write-Error + 非ゼロ exit を返すため、step 失敗として検出される。
       - name: Run aggregate verification
-        run: pwsh -NoProfile -File tools/verify-obsidian-graph-network.ps1
+        run: powershell -NoProfile -File tools/verify-obsidian-graph-network.ps1
