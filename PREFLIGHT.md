@@ -1,24 +1,29 @@
 <!-- repo-preflight:review-record -->
 
-# 公開範囲とレビュー条件
+# 公開準備状況
 
-状態: 非公開（公開済みではない）
+- HEAD: `c20e755`（作成時の main）
+- 確認日時: 2026-10-17
+- 判定: `blocked`（人間目視は未実施）
 
-このリポジトリは Obsidian のノートのつながりを確かめて保つための検査と更新の台本 を対象とします。
+## 確認済み
 
-## 公開対象
+- [ ] README / LICENSE / SECURITY.md / CONTRIBUTING.md
+- [ ] test / build / lint / smoke / E2E
+- [ ] secret / PII / personal path / history
+- [ ] dependency / license / CI workflow security
+- [ ] operations / monitoring / rollback
+- [ ] project登録 / GitHub owner / author identity policy
 
-- (実装後に記入)
+## 人間目視
 
-## 公開対象外
-
-- secret / token / 個人の絶対 path / アカウント情報
-- 公開・push・merge・visibility 変更を自動実行する機能
-
-## 判定上の停止線
-
-`readiness_scan.py` の `status: pass` はローカルで機械検査できた範囲だけを示す。公開・push・merge・visibility 変更は人が別に判断する。
-
-## レビュー記録 (2026-11-19)
-
-- bootstrap_repo.py で作成。repo-preflight の検査結果は作成時の report を参照。
+- reviewer:
+- reviewed_at:
+- exact HEAD / PR diff:
+- reviewed content:
+- decision: `approve / changes_requested`
+- 外から見えるfilesとcommit history:
+- review済み:
+- 未review:
+- 残余リスク:
+- 次に承認する正確な操作:
