@@ -1,0 +1,23 @@
+name: conventional-pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          pattern='^(feat|fix|docs|chore|refactor|test|build|ci|perf|revert)(\([^)]+\))?(!)?: .+'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            echo "PR title must follow Conventional Commits, for example: feat: 機能を追加"
+            exit 1
+          fi
