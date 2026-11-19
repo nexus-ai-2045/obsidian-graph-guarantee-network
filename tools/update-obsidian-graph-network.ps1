@@ -417,7 +417,7 @@ function Test-GraphNetNetworkGuarantee {
   if (Test-Path -LiteralPath $smartConfigPath -PathType Leaf) {
     try {
       $smartConfig = Get-Content -LiteralPath $smartConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
-      if ($smartConfig.smart_sources.folder_exclusions -match '_graph-network') {
+      if (Test-GraphNetSmartExclusionsCoverNetwork -Exclusions $smartConfig.smart_sources.folder_exclusions) {
         $smartExcludesGraphNetwork = $true
       }
     } catch {
@@ -436,7 +436,7 @@ function Test-GraphNetNetworkGuarantee {
       foreach ($pluginData in $pluginDataFiles) {
         try {
           $pluginConfig = Get-Content -LiteralPath $pluginData.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($pluginConfig.settings.smart_sources.folder_exclusions -match '_graph-network') {
+          if (Test-GraphNetSmartExclusionsCoverNetwork -Exclusions $pluginConfig.settings.smart_sources.folder_exclusions) {
             $smartExcludesGraphNetwork = $true
             break
           }

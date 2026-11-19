@@ -634,6 +634,23 @@ function Get-GraphNetStaleGeneratedFiles {
   return @($stale)
 }
 
+function Test-GraphNetSmartExclusionsCoverNetwork {
+  param([object]$Exclusions)
+
+  foreach ($value in @($Exclusions)) {
+    if ($null -eq $value) {
+      continue
+    }
+    foreach ($entry in ([string]$value).Split(',')) {
+      $normalized = $entry.Trim().Trim([char[]]@('\', '/'))
+      if ([string]::Equals($normalized, $script:GraphNetGraphNetworkFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+      }
+    }
+  }
+  return $false
+}
+
 function Get-GraphNetGraphIgnoreFilters {
   return @(
     '.git/',
