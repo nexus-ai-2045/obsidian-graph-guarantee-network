@@ -491,6 +491,65 @@ try {
 
 try {
   $vault = New-TestVault
+  @{
+    smart_sources = @{
+      folder_exclusions = '.obsidian,_graph-network-backups,.smart-env'
+    }
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env\smart_env.json')
+  $pluginDir = Join-Path $vault '.obsidian\plugins\open-connections'
+  New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+  @{
+    settings = @{
+      smart_sources = @{
+        folder_exclusions = 'archive/_graph-network,old_graph-network'
+      }
+    }
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $pluginDir 'data.json')
+  $failed = $false
+  try {
+    $null = Invoke-NetworkScript -Vault $vault -BucketCount 8
+  } catch {
+    $failed = $_.Exception.Message -match 'does not exclude _graph-network'
+  }
+  Add-TestResult 'similarly named Smart exclusions do not count as excluding _graph-network' $failed 'script accepted an exclusion that only contains the folder name'
+} catch {
+  Add-TestResult 'similarly named Smart exclusion path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-TestVault
+  @{
+    smart_sources = @{
+      folder_exclusions = '.obsidian, _graph-network/ ,.smart-env'
+    }
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env\smart_env.json')
+  $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  Add-TestResult 'Smart exclusion entry with spaces and a trailing slash still covers _graph-network' ($result.SmartExcludesGraphNetwork -eq $true) ($result | Out-String)
+} catch {
+  Add-TestResult 'Smart exclusion spacing path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $arrayCovered = Test-GraphNetSmartExclusionsCoverNetwork -Exclusions @('archive', '_graph-network')
+  $nullCovered = Test-GraphNetSmartExclusionsCoverNetwork -Exclusions $null
+  $upperCovered = Test-GraphNetSmartExclusionsCoverNetwork -Exclusions '_GRAPH-NETWORK'
+  $leadingSlashCovered = Test-GraphNetSmartExclusionsCoverNetwork -Exclusions '/_graph-network'
+  $similarCovered = Test-GraphNetSmartExclusionsCoverNetwork -Exclusions '_graph-network-backups'
+  Add-TestResult 'Smart exclusion matcher handles arrays, null, case, slashes, and similar names' ($arrayCovered -and (-not $nullCovered) -and $upperCovered -and $leadingSlashCovered -and (-not $similarCovered)) "array=$arrayCovered null=$nullCovered upper=$upperCovered leadingSlash=$leadingSlashCovered similar=$similarCovered"
+} catch {
+  Add-TestResult 'Smart exclusion matcher path' $false $_.Exception.Message
+}
+
+try {
+  $vault = New-TestVault
   '{"showOrphans":true,"hideUnresolved":false,"colorGroups":[]}' | Set-TestFileUtf8 -Path (Join-Path $vault '.obsidian\graph.json')
   $expectedLanes = Get-ExpectedLaneDefinitions -Vault $vault
   $requiredCount = @(Get-RequiredGraphNetGraphColorQueries -LaneDefinitions $expectedLanes).Count
