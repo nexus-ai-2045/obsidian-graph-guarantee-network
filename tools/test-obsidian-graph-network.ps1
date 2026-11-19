@@ -1069,6 +1069,9 @@ try {
   $doubleOpenTargets = @(Get-GraphNetWikilinkTargets -Content ('``' + "`n`n" + '[[real-four]] `x`'))
   $escapedTargets = @(Get-GraphNetWikilinkTargets -Content '\`[[real-five]]\`')
   Add-TestResult 'wikilink parse keeps links between backslash-escaped backticks' (($escapedTargets -join ',') -ceq 'real-five') ("escaped=" + ($escapedTargets -join ','))
+  $mixedCloseTargets = @(Get-GraphNetWikilinkTargets -Content ('```' + "`n" + '```~~~' + "`n" + '[[hidden-mixed]]' + "`n" + '```' + "`n" + '[[real-six]]'))
+  $evenBackslashTargets = @(Get-GraphNetWikilinkTargets -Content '\\`[[hidden-even]]` [[real-seven]]')
+  Add-TestResult 'fence closers use only the opening character and even backslashes do not escape backticks' ((($mixedCloseTargets -join ',') -ceq 'real-six') -and (($evenBackslashTargets -join ',') -ceq 'real-seven')) ("mixedClose=" + ($mixedCloseTargets -join ',') + " evenBackslash=" + ($evenBackslashTargets -join ','))
   Add-TestResult 'wikilink parse keeps real links next to unpaired backticks, inline triple backticks, and CRLF fences' ((($unpairedTargets -join ',') -ceq 'real-one') -and (($inlineTripleTargets -join ',') -ceq 'real-two') -and (($crlfTargets -join ',') -ceq 'real-three') -and (($doubleOpenTargets -join ',') -ceq 'real-four')) ("unpaired=" + ($unpairedTargets -join ',') + " inlineTriple=" + ($inlineTripleTargets -join ',') + " crlf=" + ($crlfTargets -join ',') + " doubleOpen=" + ($doubleOpenTargets -join ','))
 } catch {
   Add-TestResult 'wikilink code example parse path' $false $_.Exception.Message

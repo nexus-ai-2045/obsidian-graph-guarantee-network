@@ -423,8 +423,8 @@ function Get-GraphNetWikilinkTargets {
   # Embeds (![[...]]) are treated as links too. Whitespace-only targets are
   # dropped. This is the shared wikilink parse for the native connectivity audit.
   $targets = [System.Collections.Generic.List[string]]::new()
-  $withoutFences = [regex]::Replace([string]$Content, '(?ms)^[ \t]{0,3}(`{3,}(?=[^`\r\n]*\r?$)|~{3,})[^\r\n]*(?:\r?\n.*?^[ \t]{0,3}\1[`~]*[ \t]*\r?$|.*\z)', '')
-  $linkSource = [regex]::Replace($withoutFences, '(?s)(?<![`\\])(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n).)+?(?<!`)\1(?!`)', '')
+  $withoutFences = [regex]::Replace([string]$Content, '(?ms)^[ \t]{0,3}(?:(`{3,})(?=[^`\r\n]*\r?$)|(~{3,}))[^\r\n]*(?:\r?\n.*?^[ \t]{0,3}(?(1)\1`*|\2~*)[ \t]*\r?$|.*\z)', '')
+  $linkSource = [regex]::Replace($withoutFences, '(?s)(?<!`)(?<!(?<!\\)\\(?:\\\\)*)(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n).)+?(?<!`)\1(?!`)', '')
   foreach ($match in [regex]::Matches($linkSource, '\[\[([^\[\]]+)\]\]')) {
     $inner = $match.Groups[1].Value
     $pipe = $inner.IndexOf('|')
