@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "10afe7cea1a4ff832fb08c332290aae69a8f0fe4",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "obsidian-graph-guarantee-network",
+      "include-v-in-tag": true
+    }
+  }
+}
