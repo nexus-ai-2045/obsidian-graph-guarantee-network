@@ -1045,6 +1045,52 @@ try {
 }
 
 try {
+  $codeContent = @(
+    '# Code examples',
+    '',
+    '```markdown',
+    '[[fenced-backtick]]',
+    '```',
+    '',
+    '~~~',
+    '[[fenced-tilde]]',
+    '~~~',
+    '',
+    'Inline `[[inline-single]]` and ``[[inline-double]]`` stay examples.',
+    '',
+    '[[real-link]]'
+  ) -join "`n"
+  $codeTargets = @(Get-GraphNetWikilinkTargets -Content $codeContent)
+  $unclosedTargets = @(Get-GraphNetWikilinkTargets -Content ("[[before-fence]]`n```````n[[inside-unclosed]]"))
+  Add-TestResult 'wikilink parse ignores fenced and inline code examples' ((($codeTargets -join ',') -ceq 'real-link') -and (($unclosedTargets -join ',') -ceq 'before-fence')) ("targets=" + ($codeTargets -join ',') + " unclosed=" + ($unclosedTargets -join ','))
+  $unpairedTargets = @(Get-GraphNetWikilinkTargets -Content ('a ` b [[real-one]]' + "`n`n" + 'later `x` end'))
+  $inlineTripleTargets = @(Get-GraphNetWikilinkTargets -Content '```x``` [[real-two]]')
+  $crlfTargets = @(Get-GraphNetWikilinkTargets -Content ('```' + "`r`n" + '[[hidden]]' + "`r`n" + '```' + "`r`n" + '[[real-three]]'))
+  $doubleOpenTargets = @(Get-GraphNetWikilinkTargets -Content ('``' + "`n`n" + '[[real-four]] `x`'))
+  $escapedTargets = @(Get-GraphNetWikilinkTargets -Content '\`[[real-five]]\`')
+  Add-TestResult 'wikilink parse keeps links between backslash-escaped backticks' (($escapedTargets -join ',') -ceq 'real-five') ("escaped=" + ($escapedTargets -join ','))
+  Add-TestResult 'wikilink parse keeps real links next to unpaired backticks, inline triple backticks, and CRLF fences' ((($unpairedTargets -join ',') -ceq 'real-one') -and (($inlineTripleTargets -join ',') -ceq 'real-two') -and (($crlfTargets -join ',') -ceq 'real-three') -and (($doubleOpenTargets -join ',') -ceq 'real-four')) ("unpaired=" + ($unpairedTargets -join ',') + " inlineTriple=" + ($inlineTripleTargets -join ',') + " crlf=" + ($crlfTargets -join ',') + " doubleOpen=" + ($doubleOpenTargets -join ','))
+} catch {
+  Add-TestResult 'wikilink code example parse path' $false $_.Exception.Message
+}
+
+try {
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-audit-code-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'example.md') -Content ("# Example`n`n```````n[[target]]`n```````n`nInline ``[[target]]``")
+  Set-TestFileUtf8 -Path (Join-Path $vault 'target.md') -Content '# Target'
+  Set-TestFileUtf8 -Path (Join-Path $vault 'linker.md') -Content "# Linker`n`n[[target]]"
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'native audit does not count wikilinks inside code as edges' (($audit.CoveredNotes -eq 3) -and ($audit.OrphanNotes -eq 1) -and ($audit.NativeConnectedComponents -eq 2) -and ($audit.OrphanSample -contains 'example')) ($audit | Out-String)
+} catch {
+  Add-TestResult 'native audit code example path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
   $vault = New-AuditAmbiguousVault
   $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
   Add-TestResult 'native audit counts ambiguous and unresolved links' ($audit.UnresolvedLinks -eq 2) ($audit | Out-String)

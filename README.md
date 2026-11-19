@@ -78,7 +78,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\audit-obsidian-graph-n
 
 この診断は updater とは別物で、vault にも repo にも一切書き込まず、生成 `_graph-network` フォルダにも触れず、updater を呼びません。covered note の走査・除外述語・wikilink parse は updater と共有します。`-Vault` は必須で、省略時は updater と同様に usage error で失敗します。`-Top` は任意で、孤立サンプルの表示件数を指定します (default `20`、`0` で非表示)。
 
-wikilink の解決は basename ベースの近似です。相対パス一致を優先し、無ければ ordinal case-insensitive な basename の一意一致で解決します。曖昧 (basename 複数一致) や未解決の target は `UnresolvedLinks` に計上し、edge にはしません。出力は機械可読な object と人間可読サマリで、孤立数 (`OrphanNotes`)、native の連結成分数 (`NativeConnectedComponents`)、最大成分サイズ、native degree の分布などを含みます。同一 vault では二度実行しても同一の出力になります。
+wikilink の解決は basename ベースの近似です。相対パス一致を優先し、無ければ ordinal case-insensitive な basename の一意一致で解決します。曖昧 (basename 複数一致) や未解決の target は `UnresolvedLinks` に計上し、edge にはしません。コードブロック (```` ``` ```` や `~~~` で囲んだ部分) とインラインのコードの中にある `[[...]]` は例として扱い、リンクに数えません。ただし、行頭から4文字以上字下げした柵と、引用 (`> `) の中の柵はコードブロックとして扱わないため、その中の `[[...]]` は数えます。出力は機械可読な object と人間可読サマリで、孤立数 (`OrphanNotes`)、native の連結成分数 (`NativeConnectedComponents`)、最大成分サイズ、native degree の分布などを含みます。同一 vault では二度実行しても同一の出力になります。
 
 ## 命名と移行
 
