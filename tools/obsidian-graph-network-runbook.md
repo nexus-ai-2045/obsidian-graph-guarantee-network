@@ -36,6 +36,16 @@ files behind after the rename to the current `coverage-shard` / `graph-network-r
 names and the auto-derived lane hubs. Run the updater once with `-PruneStale` to
 archive those stale files and restore the guarantee.
 
+A covered note whose path contains `#`, `|`, `^`, `[`, or `]` cannot be written
+as a wikilink target without changing its meaning, so the updater lists every
+such path and fails before writing anything. Rename those notes or folders and
+rerun.
+
+The updater keeps the existing `userIgnoreFilters` in `.obsidian/app.json` in
+their original order and appends only the tool filters that are missing. A
+user-added `_graph-network/` filter is kept as is, which hides the generated
+network from the graph view.
+
 For a fresh operator or agent, use the copy-ready prompt in:
 
 ```text

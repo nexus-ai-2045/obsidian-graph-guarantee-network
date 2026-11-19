@@ -35,22 +35,22 @@ try {
     'LICENSE',
     'SECURITY.md',
     'PUBLIC_READY.md',
-    'tools\obsidian-graph-network-lib.ps1',
-    'tools\update-obsidian-graph-network.ps1',
-    'tools\audit-obsidian-graph-network.ps1',
-    'tools\test-obsidian-graph-network.ps1',
-    'tools\public-safety-scan.ps1',
-    'tools\obsidian-graph-network-runbook.md'
+    'tools/obsidian-graph-network-lib.ps1',
+    'tools/update-obsidian-graph-network.ps1',
+    'tools/audit-obsidian-graph-network.ps1',
+    'tools/test-obsidian-graph-network.ps1',
+    'tools/public-safety-scan.ps1',
+    'tools/obsidian-graph-network-runbook.md'
   )
 
   $missingFiles = @($requiredFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf) })
   Add-Check $checks 'required files exist' ($missingFiles.Count -eq 0) ($missingFiles -join ', ')
 
-  $testOutput = & (Join-Path $Root 'tools\test-obsidian-graph-network.ps1')
+  $testOutput = & (Join-Path $Root 'tools/test-obsidian-graph-network.ps1')
   $testSummary = @($testOutput | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1)[0]
   Add-Check $checks 'graph network test harness passes' ($testSummary.Failed -eq 0) ($testSummary | Out-String)
 
-  $safety = @(& (Join-Path $Root 'tools\public-safety-scan.ps1') | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1)[0]
+  $safety = @(& (Join-Path $Root 'tools/public-safety-scan.ps1') | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1)[0]
   Add-Check $checks 'public safety scan passes' ($safety.PublicReady -eq $true) ($safety | Out-String)
 
   if (-not (Get-Command rg -ErrorAction SilentlyContinue)) {

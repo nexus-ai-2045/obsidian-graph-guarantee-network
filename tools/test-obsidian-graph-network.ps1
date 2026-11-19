@@ -103,7 +103,7 @@ function New-TestVault {
     [pscustomobject]@{ Path = 'work\project-alpha.md'; Content = '# Project alpha' },
     [pscustomobject]@{ Path = 'nested\deep\second-level.md'; Content = '# Second level' },
     [pscustomobject]@{ Path = 'unicode-folder\utf8-note.md'; Content = '# UTF8 note' },
-    [pscustomobject]@{ Path = 'inbox\source [bracket] note.md'; Content = '# Bracket note' },
+    [pscustomobject]@{ Path = 'inbox\source (paren) note.md'; Content = '# Paren note' },
     [pscustomobject]@{ Path = '_graph-network\manual.md'; Content = '# excluded generated note' },
     [pscustomobject]@{ Path = '.trash\deleted.md'; Content = '# excluded trash note' },
     [pscustomobject]@{ Path = 'node_modules\pkg\README.md'; Content = '# excluded dependency readme' },
@@ -258,9 +258,9 @@ function Get-NoteHashes {
 
   $hashes = @{}
   Get-ChildItem -LiteralPath $Vault -Recurse -Force -Filter '*.md' -File |
-    Where-Object { $_.FullName -notmatch '\\_graph-network\\' } |
+    Where-Object { $_.FullName -notmatch '[\\/]_graph-network[\\/]' } |
     ForEach-Object {
-      $relative = $_.FullName.Substring($Vault.Length).TrimStart('\')
+      $relative = $_.FullName.Substring($Vault.Length).TrimStart('\', '/')
       $hashes[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
     }
 
@@ -515,6 +515,61 @@ try {
   Add-TestResult 'empty graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge $requiredCount)) ($graphConfig | ConvertTo-Json -Depth 12)
 } catch {
   Add-TestResult 'empty graph setting failure path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-TestVault
+  [ordered]@{
+    alwaysUpdateLinks = $true
+    userIgnoreFilters = @('private-drafts/', '_graph-network/', '**/node_modules/')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.obsidian\app.json')
+  $first = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  $second = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  $appConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\app.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $filters = @($appConfig.userIgnoreFilters)
+  $toolFilters = @(Get-GraphNetGraphIgnoreFilters)
+  $missingToolFilters = @($toolFilters | Where-Object { $filters -notcontains $_ })
+  $duplicateFilters = @($filters | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object Name)
+  $expectedFilters = @('private-drafts/', '_graph-network/', '**/node_modules/') + @($toolFilters | Where-Object { $_ -cne '**/node_modules/' })
+  $userFiltersFirst = (($filters -join "`n") -ceq ($expectedFilters -join "`n"))
+  Add-TestResult 'user app ignore filters are preserved and tool filters are merged without duplicates' (($missingToolFilters.Count -eq 0) -and ($duplicateFilters.Count -eq 0) -and $userFiltersFirst -and ($appConfig.alwaysUpdateLinks -eq $true) -and ($first.AppSettingsUpdated -eq $true) -and ($second.AppSettingsUpdated -eq $false) -and ($second.UpdatedFiles -eq 0)) (($appConfig | ConvertTo-Json -Depth 8) + [Environment]::NewLine + 'Missing: ' + ($missingToolFilters -join ', ') + ' Duplicates: ' + ($duplicateFilters -join ', '))
+} catch {
+  Add-TestResult 'user app ignore filter merge path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-SmallTestVault
+  $graphConfigBefore = (Get-FileHash -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Algorithm SHA256).Hash
+  $unsafeNotes = @('inbox\hash # note.md', 'inbox\caret ^ note.md', 'inbox\[open] note.md', 'bracket]folder\plain note.md')
+  foreach ($unsafe in $unsafeNotes) {
+    $unsafePath = Join-Path $vault $unsafe
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $unsafePath) | Out-Null
+    Set-TestFileUtf8 -Path $unsafePath -Content '# unsafe link target'
+  }
+  $message = ''
+  $failed = $false
+  try {
+    $null = Invoke-NetworkScript -Vault $vault -BucketCount 8
+  } catch {
+    $message = $_.Exception.Message
+    $failed = $message -match 'cannot be written as wikilink targets'
+  }
+  $expectedTargets = @('inbox/hash # note.md', 'inbox/caret ^ note.md', 'inbox/[open] note.md', 'bracket]folder/plain note.md')
+  $missingNames = @($expectedTargets | Where-Object { -not $message.Contains($_) })
+  $networkExists = Test-Path -LiteralPath (Get-GraphNetGraphNetworkPath -Vault $vault)
+  $appConfigExists = Test-Path -LiteralPath (Join-Path $vault '.obsidian\app.json')
+  $graphConfigAfter = (Get-FileHash -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Algorithm SHA256).Hash
+  Add-TestResult 'note paths with wikilink-breaking characters fail clearly before writing' ($failed -and ($missingNames.Count -eq 0) -and (-not $networkExists) -and (-not $appConfigExists) -and ($graphConfigBefore -eq $graphConfigAfter)) ('message=' + $message + ' missing=' + ($missingNames -join ', ') + ' networkExists=' + $networkExists + ' appConfigExists=' + $appConfigExists + ' graphConfigUnchanged=' + ($graphConfigBefore -eq $graphConfigAfter))
+} catch {
+  Add-TestResult 'wikilink-breaking path failure path' $false $_.Exception.Message
 } finally {
   if ($vault -and (Test-Path -LiteralPath $vault)) {
     Remove-Item -LiteralPath $vault -Recurse -Force
@@ -908,7 +963,7 @@ function Get-AuditVaultSnapshot {
 
   $snapshot = @{}
   Get-ChildItem -LiteralPath $Vault -Recurse -Force -File | ForEach-Object {
-    $relative = $_.FullName.Substring($Vault.Length).TrimStart('\')
+    $relative = $_.FullName.Substring($Vault.Length).TrimStart('\', '/')
     $snapshot[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
   }
 

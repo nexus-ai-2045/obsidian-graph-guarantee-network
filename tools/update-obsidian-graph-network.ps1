@@ -89,7 +89,20 @@ function Set-GraphNetAppSettings {
     }
   }
 
-  $appConfig['userIgnoreFilters'] = @(Get-GraphNetGraphIgnoreFilters)
+  $existingFilters = @()
+  if ($appConfig.Contains('userIgnoreFilters') -and ($null -ne $appConfig['userIgnoreFilters'])) {
+    $existingFilters = @($appConfig['userIgnoreFilters'])
+  }
+  $mergedFilters = [System.Collections.Generic.List[object]]::new()
+  foreach ($filter in $existingFilters) {
+    $mergedFilters.Add($filter)
+  }
+  foreach ($filter in (Get-GraphNetGraphIgnoreFilters)) {
+    if (-not ($mergedFilters -ccontains $filter)) {
+      $mergedFilters.Add($filter)
+    }
+  }
+  $appConfig['userIgnoreFilters'] = @($mergedFilters)
   $appJson = $appConfig | ConvertTo-Json -Depth 8
   return (Write-GraphNetFileIfChanged -Path $AppConfigPath -Content ($appJson + [Environment]::NewLine))
 }
@@ -108,6 +121,10 @@ function New-GraphNetCoverageBuckets {
   # skipped at traversal time instead of being enumerated and filtered later.
   # The covered note set is identical to the previous full recursive scan.
   $notes = @(Get-GraphNetCoveredNoteFiles -Vault $Vault)
+  $unsafePaths = @(Get-GraphNetWikilinkUnsafeNotePaths -Notes $notes -Vault $Vault)
+  if ($unsafePaths.Count -gt 0) {
+    throw ("These note paths cannot be written as wikilink targets because they contain one of # | ^ [ ]. Rename them and rerun: {0}" -f ($unsafePaths -join ', '))
+  }
 
   # Derive the lane model from the top-level folder of every covered note, so
   # hubs, colors, and routing all follow the vault's actual structure.
@@ -522,9 +539,8 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $archive = Join-Path $ArchiveRoot $stamp
 $shardPrefix = $script:GraphNetCoverageShardPrefix
 
-New-Item -ItemType Directory -Force -Path $network | Out-Null
-
 $build = New-GraphNetCoverageBuckets -Vault $Vault -RequestedBucketCount $BucketCount
+New-Item -ItemType Directory -Force -Path $network | Out-Null
 $laneDefinitions = @($build.LaneDefinitions)
 $write = Write-GraphNetNetworkFiles -Network $network -Build $build -ShardPrefix $shardPrefix -LaneDefinitions $laneDefinitions -PruneStale:$PruneStale -Archive $archive
 

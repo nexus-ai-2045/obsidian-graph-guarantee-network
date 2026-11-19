@@ -28,6 +28,8 @@ $script:GraphNetGraphExcludedPathParts = @(
   'vendor',
   $script:GraphNetGraphNetworkFolder
 )
+$script:GraphNetPathSeparators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+$script:GraphNetWikilinkUnsafeChars = [char[]]@('#', '|', '^', '[', ']')
 
 # Graph color palette (Obsidian RGB integers). The anchors, coverage shards, and
 # the intake hub carry fixed colors; each lane hub takes the next palette color,
@@ -54,19 +56,40 @@ function Get-GraphNetGraphNetworkPath {
   return (Join-Path $Vault $script:GraphNetGraphNetworkFolder)
 }
 
+function Get-GraphNetRelativePathParts {
+  param(
+    [string]$Path,
+    [string]$Vault
+  )
+
+  return @($Path.Substring($Vault.Length).Split($script:GraphNetPathSeparators, [System.StringSplitOptions]::RemoveEmptyEntries))
+}
+
+function Get-GraphNetWikilinkUnsafeNotePaths {
+  param(
+    [object[]]$Notes = @(),
+    [string]$Vault
+  )
+
+  $unsafe = [string[]]@($Notes | ForEach-Object {
+    (Get-GraphNetRelativePathParts -Path $_.FullName -Vault $Vault) -join '/'
+  } | Where-Object { $_.IndexOfAny($script:GraphNetWikilinkUnsafeChars) -ge 0 })
+  [System.Array]::Sort($unsafe, [System.StringComparer]::Ordinal)
+  return @($unsafe)
+}
+
 function ConvertTo-GraphNetWikiTarget {
   param(
     [string]$Path,
     [string]$Vault
   )
 
-  $relative = $Path.Substring($Vault.Length).TrimStart('\')
+  $relative = (Get-GraphNetRelativePathParts -Path $Path -Vault $Vault) -join '/'
   if (-not $relative.EndsWith('.md', [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Expected markdown note path to end with .md: $Path"
   }
 
-  $withoutExt = $relative.Substring(0, $relative.Length - 3)
-  return ($withoutExt -replace '\\', '/')
+  return $relative.Substring(0, $relative.Length - 3)
 }
 
 function Get-GraphNetTopFolder {
@@ -79,8 +102,7 @@ function Get-GraphNetTopFolder {
   # sits directly in the vault root. This single derivation drives the dynamic
   # lane taxonomy: distinct non-empty results become lane hubs and root-level
   # notes (empty result) are routed to the intake hub.
-  $relative = $Path.Substring($Vault.Length).TrimStart('\')
-  $parts = @($relative -split '\\' | Where-Object { $_ })
+  $parts = @(Get-GraphNetRelativePathParts -Path $Path -Vault $Vault)
   if ($parts.Count -le 1) {
     return ''
   }
@@ -194,8 +216,7 @@ function Test-GraphNetCoveredNotePath {
     [string]$Vault
   )
 
-  $relative = $Path.Substring($Vault.Length).TrimStart('\')
-  $parts = @($relative -split '\\' | Where-Object { $_ })
+  $parts = @(Get-GraphNetRelativePathParts -Path $Path -Vault $Vault)
   if ($parts.Count -eq 0) {
     return $false
   }
