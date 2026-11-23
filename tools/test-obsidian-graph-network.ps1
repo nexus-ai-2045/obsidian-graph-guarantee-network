@@ -76,7 +76,7 @@ function New-TestVault {
   $root = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-test-' + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $root | Out-Null
 
-  $dirs = @('.obsidian', '.smart-env', 'inbox', 'work', 'nested\deep', 'unicode-folder', '.trash', '_graph-network', 'node_modules\pkg', '.pytest_cache', 'archive', 'work\.archive')
+  $dirs = @('.obsidian', '.smart-env', 'inbox', 'work', 'nested/deep', 'unicode-folder', '.trash', '_graph-network', 'node_modules/pkg', '.pytest_cache', 'archive', 'work/.archive')
   foreach ($dir in $dirs) {
     New-Item -ItemType Directory -Force -Path (Join-Path $root $dir) | Out-Null
   }
@@ -85,7 +85,7 @@ function New-TestVault {
     showOrphans = $false
     hideUnresolved = $true
     showAttachments = $false
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.obsidian\graph.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.obsidian/graph.json')
 
   @{
     smart_sources = @{
@@ -95,21 +95,21 @@ function New-TestVault {
       embed_blocks = $false
       min_chars = 1200
     }
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.smart-env\smart_env.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.smart-env/smart_env.json')
 
   $notes = @(
     [pscustomobject]@{ Path = 'root-note.md'; Content = '# Root note' },
-    [pscustomobject]@{ Path = 'inbox\capture one.md'; Content = '# Capture one' },
-    [pscustomobject]@{ Path = 'work\project-alpha.md'; Content = '# Project alpha' },
-    [pscustomobject]@{ Path = 'nested\deep\second-level.md'; Content = '# Second level' },
-    [pscustomobject]@{ Path = 'unicode-folder\utf8-note.md'; Content = '# UTF8 note' },
-    [pscustomobject]@{ Path = 'inbox\source (paren) note.md'; Content = '# Paren note' },
-    [pscustomobject]@{ Path = '_graph-network\manual.md'; Content = '# excluded generated note' },
-    [pscustomobject]@{ Path = '.trash\deleted.md'; Content = '# excluded trash note' },
-    [pscustomobject]@{ Path = 'node_modules\pkg\README.md'; Content = '# excluded dependency readme' },
-    [pscustomobject]@{ Path = '.pytest_cache\README.md'; Content = '# excluded cache readme' },
-    [pscustomobject]@{ Path = 'archive\old.md'; Content = '# included history note' },
-    [pscustomobject]@{ Path = 'work\.archive\old-case.md'; Content = '# included dotted archive note' }
+    [pscustomobject]@{ Path = 'inbox/capture one.md'; Content = '# Capture one' },
+    [pscustomobject]@{ Path = 'work/project-alpha.md'; Content = '# Project alpha' },
+    [pscustomobject]@{ Path = 'nested/deep/second-level.md'; Content = '# Second level' },
+    [pscustomobject]@{ Path = 'unicode-folder/utf8-note.md'; Content = '# UTF8 note' },
+    [pscustomobject]@{ Path = 'inbox/source (paren) note.md'; Content = '# Paren note' },
+    [pscustomobject]@{ Path = '_graph-network/manual.md'; Content = '# excluded generated note' },
+    [pscustomobject]@{ Path = '.trash/deleted.md'; Content = '# excluded trash note' },
+    [pscustomobject]@{ Path = 'node_modules/pkg/README.md'; Content = '# excluded dependency readme' },
+    [pscustomobject]@{ Path = '.pytest_cache/README.md'; Content = '# excluded cache readme' },
+    [pscustomobject]@{ Path = 'archive/old.md'; Content = '# included history note' },
+    [pscustomobject]@{ Path = 'work/.archive/old-case.md'; Content = '# included dotted archive note' }
   )
 
   foreach ($entry in $notes) {
@@ -131,13 +131,13 @@ function New-SmallTestVault {
     showOrphans = $false
     hideUnresolved = $true
     showAttachments = $false
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.obsidian\graph.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.obsidian/graph.json')
 
   @{
     smart_sources = @{
       folder_exclusions = '.obsidian,.smart-env,_graph-network'
     }
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.smart-env\smart_env.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.smart-env/smart_env.json')
 
   for ($i = 1; $i -le $NoteCount; $i++) {
     Set-TestFileUtf8 -Path (Join-Path $root ('note-{0}.md' -f $i)) -Content ('# Note {0}' -f $i)
@@ -164,19 +164,19 @@ function New-FolderedTestVault {
     showOrphans = $false
     hideUnresolved = $true
     showAttachments = $false
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.obsidian\graph.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.obsidian/graph.json')
 
   @{
     smart_sources = @{
       folder_exclusions = '.obsidian,.smart-env,_graph-network'
     }
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.smart-env\smart_env.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $root '.smart-env/smart_env.json')
 
   for ($f = 1; $f -le $FolderCount; $f++) {
     $folder = 'folder-{0:D2}' -f $f
     New-Item -ItemType Directory -Force -Path (Join-Path $root $folder) | Out-Null
     for ($n = 1; $n -le $NotesPerFolder; $n++) {
-      Set-TestFileUtf8 -Path (Join-Path $root ('{0}\note-{1}.md' -f $folder, $n)) -Content ('# {0} note {1}' -f $folder, $n)
+      Set-TestFileUtf8 -Path (Join-Path $root ('{0}/note-{1}.md' -f $folder, $n)) -Content ('# {0} note {1}' -f $folder, $n)
     }
   }
 
@@ -352,8 +352,8 @@ try {
   Add-TestResult 'utf8 validation is built into update output' ($first.Utf8Failures -eq 0) ($first | Out-String)
   Add-TestResult 'smart exclusion is enforced by update output' ($first.SmartExcludesGraphNetwork -eq $true) ($first | Out-String)
   Add-TestResult 'graph settings are enforced by update output' ($first.GraphSettingsOk -eq $true) ($first | Out-String)
-  $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-  $appConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\app.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian/graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $appConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian/app.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   $requiredIgnoreFilters = @('**/node_modules/', '**/__pycache__/', '.pytest_cache/')
   $missingIgnoreFilters = @($requiredIgnoreFilters | Where-Object { @($appConfig.userIgnoreFilters) -notcontains $_ })
   Add-TestResult 'app ignore filters exclude cache surfaces but keep graph network visible' (($missingIgnoreFilters.Count -eq 0) -and (@($appConfig.userIgnoreFilters) -notcontains '**/archive/') -and (@($appConfig.userIgnoreFilters) -notcontains '_graph-network/')) (($appConfig | ConvertTo-Json -Depth 8) + [Environment]::NewLine + 'Missing: ' + ($missingIgnoreFilters -join ', '))
@@ -476,7 +476,7 @@ try {
     smart_sources = @{
       folder_exclusions = '.obsidian,.smart-env'
     }
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env\smart_env.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env/smart_env.json')
   $failed = $false
   try {
     $null = Invoke-NetworkScript -Vault $vault -BucketCount 8
@@ -496,8 +496,8 @@ try {
   $vault = New-TestVault
   # Drop the legacy Smart Connections config so this case only passes via the current
   # plugin layout (settings.smart_sources.folder_exclusions in the plugin's data.json).
-  Remove-Item -LiteralPath (Join-Path $vault '.smart-env\smart_env.json') -Force
-  $pluginDir = Join-Path $vault '.obsidian\plugins\open-connections'
+  Remove-Item -LiteralPath (Join-Path $vault '.smart-env/smart_env.json') -Force
+  $pluginDir = Join-Path $vault '.obsidian/plugins/open-connections'
   New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
   @{
     installed_at = 1
@@ -524,8 +524,8 @@ try {
     smart_sources = @{
       folder_exclusions = '.obsidian,_graph-network-backups,.smart-env'
     }
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env\smart_env.json')
-  $pluginDir = Join-Path $vault '.obsidian\plugins\open-connections'
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env/smart_env.json')
+  $pluginDir = Join-Path $vault '.obsidian/plugins/open-connections'
   New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
   @{
     settings = @{
@@ -555,7 +555,7 @@ try {
     smart_sources = @{
       folder_exclusions = '.obsidian, _graph-network/ ,.smart-env'
     }
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env\smart_env.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.smart-env/smart_env.json')
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
   Add-TestResult 'Smart exclusion entry with spaces and a trailing slash still covers _graph-network' ($result.SmartExcludesGraphNetwork -eq $true) ($result | Out-String)
 } catch {
@@ -579,11 +579,11 @@ try {
 
 try {
   $vault = New-TestVault
-  '{"showOrphans":true,"hideUnresolved":false,"colorGroups":[]}' | Set-TestFileUtf8 -Path (Join-Path $vault '.obsidian\graph.json')
+  '{"showOrphans":true,"hideUnresolved":false,"colorGroups":[]}' | Set-TestFileUtf8 -Path (Join-Path $vault '.obsidian/graph.json')
   $expectedLanes = Get-ExpectedLaneDefinitions -Vault $vault
   $requiredCount = @(Get-RequiredGraphNetGraphColorQueries -LaneDefinitions $expectedLanes).Count
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
-  $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian/graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   Add-TestResult 'bad graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge $requiredCount) -and ($result.MissingGraphColorGroups -eq 0)) ($graphConfig | ConvertTo-Json -Depth 12)
 } catch {
   Add-TestResult 'bad graph setting failure path' $false $_.Exception.Message
@@ -595,11 +595,11 @@ try {
 
 try {
   $vault = New-TestVault
-  [System.IO.File]::WriteAllText((Join-Path $vault '.obsidian\graph.json'), '', [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText((Join-Path $vault '.obsidian/graph.json'), '', [System.Text.UTF8Encoding]::new($false))
   $expectedLanes = Get-ExpectedLaneDefinitions -Vault $vault
   $requiredCount = @(Get-RequiredGraphNetGraphColorQueries -LaneDefinitions $expectedLanes).Count
   $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
-  $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $graphConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian/graph.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   Add-TestResult 'empty graph settings are repaired' (($result.GraphSettingsOk -eq $true) -and ($result.GraphSettingsUpdated -eq $true) -and ($graphConfig.showOrphans -eq $false) -and ($graphConfig.hideUnresolved -eq $true) -and (@($graphConfig.colorGroups).Count -ge $requiredCount)) ($graphConfig | ConvertTo-Json -Depth 12)
 } catch {
   Add-TestResult 'empty graph setting failure path' $false $_.Exception.Message
@@ -614,10 +614,10 @@ try {
   [ordered]@{
     alwaysUpdateLinks = $true
     userIgnoreFilters = @('private-drafts/', '_graph-network/', '**/node_modules/')
-  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.obsidian\app.json')
+  } | ConvertTo-Json -Depth 8 | Set-TestFileUtf8 -Path (Join-Path $vault '.obsidian/app.json')
   $first = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
   $second = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
-  $appConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian\app.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $appConfig = Get-Content -LiteralPath (Join-Path $vault '.obsidian/app.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   $filters = @($appConfig.userIgnoreFilters)
   $toolFilters = @(Get-GraphNetGraphIgnoreFilters)
   $missingToolFilters = @($toolFilters | Where-Object { $filters -notcontains $_ })
@@ -635,8 +635,8 @@ try {
 
 try {
   $vault = New-SmallTestVault
-  $graphConfigBefore = (Get-FileHash -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Algorithm SHA256).Hash
-  $unsafeNotes = @('inbox\hash # note.md', 'inbox\caret ^ note.md', 'inbox\[open] note.md', 'bracket]folder\plain note.md')
+  $graphConfigBefore = (Get-FileHash -LiteralPath (Join-Path $vault '.obsidian/graph.json') -Algorithm SHA256).Hash
+  $unsafeNotes = @('inbox/hash # note.md', 'inbox/caret ^ note.md', 'inbox/[open] note.md', 'bracket]folder/plain note.md')
   foreach ($unsafe in $unsafeNotes) {
     $unsafePath = Join-Path $vault $unsafe
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $unsafePath) | Out-Null
@@ -653,8 +653,8 @@ try {
   $expectedTargets = @('inbox/hash # note.md', 'inbox/caret ^ note.md', 'inbox/[open] note.md', 'bracket]folder/plain note.md')
   $missingNames = @($expectedTargets | Where-Object { -not $message.Contains($_) })
   $networkExists = Test-Path -LiteralPath (Get-GraphNetGraphNetworkPath -Vault $vault)
-  $appConfigExists = Test-Path -LiteralPath (Join-Path $vault '.obsidian\app.json')
-  $graphConfigAfter = (Get-FileHash -LiteralPath (Join-Path $vault '.obsidian\graph.json') -Algorithm SHA256).Hash
+  $appConfigExists = Test-Path -LiteralPath (Join-Path $vault '.obsidian/app.json')
+  $graphConfigAfter = (Get-FileHash -LiteralPath (Join-Path $vault '.obsidian/graph.json') -Algorithm SHA256).Hash
   Add-TestResult 'note paths with wikilink-breaking characters fail clearly before writing' ($failed -and ($missingNames.Count -eq 0) -and (-not $networkExists) -and (-not $appConfigExists) -and ($graphConfigBefore -eq $graphConfigAfter)) ('message=' + $message + ' missing=' + ($missingNames -join ', ') + ' networkExists=' + $networkExists + ' appConfigExists=' + $appConfigExists + ' graphConfigUnchanged=' + ($graphConfigBefore -eq $graphConfigAfter))
 } catch {
   Add-TestResult 'wikilink-breaking path failure path' $false $_.Exception.Message
@@ -966,11 +966,11 @@ try {
   # Test-GraphNetCoveredNotePath.
   $vault = New-TestVault
   $plantedNotes = @(
-    'node_modules\pkg\dist\docs\excluded-dependency-doc.md',
-    '.git\info\excluded-git-note.md',
-    'work\__pycache__\excluded-bytecode-note.md',
-    'work\build-cache\notes\excluded-cache-note.md',
-    '.obsidian\plugins\sample\excluded-plugin-note.md'
+    'node_modules/pkg/dist/docs/excluded-dependency-doc.md',
+    '.git/info/excluded-git-note.md',
+    'work/__pycache__/excluded-bytecode-note.md',
+    'work/build-cache/notes/excluded-cache-note.md',
+    '.obsidian/plugins/sample/excluded-plugin-note.md'
   )
   foreach ($note in $plantedNotes) {
     $notePath = Join-Path $vault $note
@@ -1028,8 +1028,8 @@ function New-AuditAmbiguousVault {
   New-Item -ItemType Directory -Force -Path (Join-Path $root 'sub1') | Out-Null
   New-Item -ItemType Directory -Force -Path (Join-Path $root 'sub2') | Out-Null
 
-  Set-TestFileUtf8 -Path (Join-Path $root 'sub1\dupname.md') -Content '# Duplicate name one'
-  Set-TestFileUtf8 -Path (Join-Path $root 'sub2\dupname.md') -Content '# Duplicate name two'
+  Set-TestFileUtf8 -Path (Join-Path $root 'sub1/dupname.md') -Content '# Duplicate name one'
+  Set-TestFileUtf8 -Path (Join-Path $root 'sub2/dupname.md') -Content '# Duplicate name two'
   Set-TestFileUtf8 -Path (Join-Path $root 'linker.md') -Content "# Linker`n`n[[dupname]]`n[[missing-note]]"
 
   return $root
