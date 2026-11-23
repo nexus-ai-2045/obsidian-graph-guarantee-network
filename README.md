@@ -18,11 +18,19 @@ Obsidian のノート本文を変更せず、既存リンクの孤立・連結�
 
 ## 使い方
 
-Windows PowerShell 5.1 以降を対象にしています。対象 vault を明示し、最初は次の診断だけを実行します。
+Windows PowerShell 5.1 と PowerShell 7 (Windows / macOS / Linux) を対象にしています。対象 vault を明示し、最初は次の診断だけを実行します。
 
 ```powershell
+# Windows PowerShell 5.1
 powershell -NoProfile -File tools\audit-obsidian-graph-network.ps1 -Vault "C:\Path\To\Vault" -Top 20
 ```
+
+```sh
+# PowerShell 7 (macOS / Linux / Windows)
+pwsh -NoProfile -File tools/audit-obsidian-graph-network.ps1 -Vault ~/Vaults/MyVault -Top 20
+```
+
+macOS では `brew install powershell ripgrep` で PowerShell 7 と ripgrep を入れられます (ripgrep は検証スクリプトだけが使います)。
 
 `-Top 0` なら孤立ノートの名前を出さず、集計だけを確認できます (default `20`)。`-Vault` の省略・不存在はエラーです。診断は vault にも repository にも書き込まず、生成 `_graph-network` フォルダにも触れず、生成側の updater を呼びません。covered note の走査・除外述語・wikilink parse は updater と共有します。
 
@@ -52,7 +60,8 @@ updater は covered note を生成 coverage リンクで機械的に 2 本ずつ
 - 生成後に全ノートが接続済みに見えても、知識ネットワークの品質を保証しません。
 - 生成モードは graph の表示設定を変更します。既存設定のバックアップと差分確認が必要です。
 - 古い生成物を自動削除しません。所有する生成物と手書きノートを区別し、別の明示レビューで扱います。
-- 対象は Windows と Windows PowerShell 5.1 以降です。macOS / Linux の PowerShell 7 での動作は保証していません。相対 path は Windows / POSIX の区切り文字を共通化していますが、fixture 検査と実機での確認は別です。
+- 対象は Windows PowerShell 5.1 と PowerShell 7 (Windows / macOS / Linux) です。CI は4つの組合せ (Windows 5.1、Windows 7、Ubuntu 7、macOS 7) で test harness と verify を実行します。fixture 検査と実 vault での確認は別です。
+- macOS / Linux は大文字・小文字を区別するファイルシステムが多く、basename の一意一致は Windows と同じく大文字・小文字を区別せずに判定します。
 - file / directory の symlink・junction 等の reparse point は列挙対象外です。壊れたリンクや vault 外のリンク先を読まず、リンクそのものを変更・削除しません。
 - `tools/public-safety-scan.ps1` は文字列パターンによる簡易検査で、秘密情報や個人情報が無いことを保証するものではありません。
 - 診断結果に含まれるノート名や個人情報を、そのまま公開 repository へ保存しないでください。
@@ -65,12 +74,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\public-safety-scan.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\verify-obsidian-graph-network.ps1
 ```
 
+PowerShell 7 では `pwsh -NoProfile -File tools/test-obsidian-graph-network.ps1` のように `pwsh` で同じスクリプトを実行します。
+
 test harness は一時 fixture を使用します。fixture 成功を実 vault での運用確認に読み替えません。verification command の `OperationalGuaranteeOk : True` と `ImplementationResidualWork : 0` も検査対象の範囲で解釈し、意味的な品質保証とは分けて扱います。
 
 ## ファイルと編集責務
 
 - `tools/audit-obsidian-graph-network.ps1`: 通常の読取り専用入口。
-- `tools/obsidian-graph-network-lib.ps1`: updater・audit・test harness が共有する走査・除外・接続分析。
+- `tools/obsidian-graph-network-lib.ps1`: updater・audit・test harness が dot-source する共有 helper の入口。中身は `tools/lib/` に関心ごとに分けています。
+  - `lib/config.ps1`: 生成フォルダ名・除外リスト・色などの定数。
+  - `lib/vault-walk.ps1`: vault の path と note walker (どの Markdown を対象にするか)。
+  - `lib/graph.ps1`: bucket・隣接・連結成分の計算。
+  - `lib/links.ps1`: wikilink の解析と native graph。
+  - `lib/generated.ps1`: 生成ネットワークの lane・生成物・Smart Connections と graph 設定。
 - `tools/update-obsidian-graph-network.ps1`: 任意の生成・設定反映。
 - `tools/test-obsidian-graph-network.ps1`: local test harness。
 - `tools/verify-obsidian-graph-network.ps1`: 実装・運用チェックをまとめて確認する aggregate verification。
