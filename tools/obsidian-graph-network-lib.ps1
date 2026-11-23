@@ -246,12 +246,10 @@ function Get-GraphNetCoveredNoteFiles {
     # -Force keeps hidden entries visible, matching the previous
     # Get-ChildItem -Recurse -Force scan (for example work\.archive notes).
     foreach ($entry in @(Get-ChildItem -LiteralPath $current.Path -Force)) {
+      if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        continue
+      }
       if ($entry.PSIsContainer) {
-        # Reparse points (junctions / symlinks) are not descended into, so
-        # the walk cannot cycle through self-referencing links.
-        if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-          continue
-        }
         if (-not (Test-GraphNetExcludedPathPart -Part $entry.Name -TopLevel $current.TopLevel)) {
           $pending.Push([pscustomobject]@{ Path = $entry.FullName; TopLevel = $false })
         }
