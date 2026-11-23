@@ -2,7 +2,9 @@
 
 param(
   [string]$Vault,
-  [int]$Top = 20
+  [int]$Top = 20,
+  [string]$ReportDirectory,
+  [int]$SmallIslandMaxSize = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,14 +13,16 @@ $ErrorActionPreference = 'Stop'
 
 # ---- read-only native connectivity audit ----
 #
-# STRICTLY READ-ONLY. This diagnostic never writes, creates, or deletes anything
-# in the vault or the repo, and never touches the generated _graph-network
-# folder or invokes the updater. It measures the vault's own (native) wikilink
+# READ-ONLY BY DEFAULT. Without -ReportDirectory this diagnostic never writes,
+# creates, or deletes anything in the vault or the repo, never touches the
+# generated _graph-network folder, and never invokes the updater. With
+# -ReportDirectory it writes only graph-audit.json, graph-audit.md and
+# graph-audit.base into that one folder, and never edits a note. It measures the vault's own (native) wikilink
 # connectivity with the machine-added coverage edges removed, so orphans and
 # fragmentation that the generated network otherwise hides stay visible.
 
 if ([string]::IsNullOrWhiteSpace($Vault)) {
-  throw ("Vault path is required. Usage: audit-obsidian-graph-network.ps1 -Vault <vault-directory> [-Top <n, orphan sample size, default 20>]")
+  throw ("Vault path is required. Usage: audit-obsidian-graph-network.ps1 -Vault <vault-directory> [-Top <n, orphan sample size, default 20>] [-ReportDirectory <folder>] [-SmallIslandMaxSize <n, default 5>]")
 }
 
 if (-not (Test-Path -LiteralPath $Vault -PathType Container)) {
@@ -31,11 +35,38 @@ if ($Top -lt 0) {
   throw "Top must be zero or greater."
 }
 
+if ($SmallIslandMaxSize -lt 2) {
+  throw "SmallIslandMaxSize must be 2 or greater."
+}
+
+# The report folder is resolved before the walk. When it sits inside the vault,
+# its files are left out of the measured notes, so the report never measures
+# itself. Writing into the generated network folder is refused.
+$reportFull = $null
+$reportRelative = $null
+if (-not [string]::IsNullOrWhiteSpace($ReportDirectory)) {
+  $reportFull = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ReportDirectory).TrimEnd([char[]]@('\', '/'))
+  $vaultPrefix = $Vault.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+  if ($reportFull.StartsWith($vaultPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $reportRelative = ($reportFull.Substring($vaultPrefix.Length) -replace '\\', '/')
+    $firstPart = $reportRelative.Split('/')[0]
+    if ($firstPart -ieq $script:GraphNetGraphNetworkFolder) {
+      throw ("ReportDirectory must not be inside the generated {0} folder." -f $script:GraphNetGraphNetworkFolder)
+    }
+  } elseif ($reportFull -ieq $Vault.TrimEnd([char[]]@('\', '/'))) {
+    throw "ReportDirectory must be a folder, not the vault root itself."
+  }
+}
+
 # Covered notes: reuse the same pruned walk and exclusion predicate as the
 # updater so the audit measures exactly the note set the generated network
 # covers. Get-GraphNetCoveredNoteFiles is read-only (Get-ChildItem only) and
 # never creates the _graph-network folder.
 $notes = @(Get-GraphNetCoveredNoteFiles -Vault $Vault)
+if ($null -ne $reportRelative) {
+  $reportPrefix = $reportFull + [System.IO.Path]::DirectorySeparatorChar
+  $notes = @($notes | Where-Object { -not $_.FullName.StartsWith($reportPrefix, [System.StringComparison]::OrdinalIgnoreCase) })
+}
 
 $native = Get-GraphNetNativeGraph -Vault $Vault -Notes $notes
 
@@ -74,6 +105,22 @@ $result = [pscustomobject]@{
   NotesRescuedByGeneratedNetwork = $rescued
 }
 
+if ($null -ne $reportFull) {
+  New-Item -ItemType Directory -Force -Path $reportFull | Out-Null
+  $components = Get-GraphNetComponents -Adjacency $native.Adjacency
+  $reportData = Get-GraphNetAuditReportData -Summary $result -Orphans $orphanNodes -Components $components -UnresolvedDetails $native.UnresolvedLinkDetails -SmallIslandMaxSize $SmallIslandMaxSize
+  $excluded = @($script:GraphNetGraphNetworkFolder)
+  if ($null -ne $reportRelative) {
+    $excluded += $reportRelative
+  }
+  $reportUpdated = 0
+  if (Write-GraphNetReportFile -Path (Join-Path $reportFull $script:GraphNetReportJsonName) -Content ($reportData | ConvertTo-Json -Depth 8)) { $reportUpdated++ }
+  if (Write-GraphNetReportFile -Path (Join-Path $reportFull $script:GraphNetReportMarkdownName) -Content (ConvertTo-GraphNetAuditMarkdown -Data $reportData)) { $reportUpdated++ }
+  if (Write-GraphNetReportFile -Path (Join-Path $reportFull $script:GraphNetReportBaseName) -Content (ConvertTo-GraphNetAuditBase -ExcludedFolders $excluded)) { $reportUpdated++ }
+  $result | Add-Member -NotePropertyName ReportDirectory -NotePropertyValue $reportFull
+  $result | Add-Member -NotePropertyName ReportUpdatedFiles -NotePropertyValue $reportUpdated
+}
+
 # Human-readable summary on the information stream (Write-Host), leaving the
 # machine-readable object as the sole success-stream output.
 Write-Host ''
@@ -91,6 +138,9 @@ if ($orphanSample.Count -gt 0) {
   foreach ($orphan in $orphanSample) {
     Write-Host ('    - {0}' -f $orphan)
   }
+}
+if ($null -ne $reportFull) {
+  Write-Host ('  Report:                         {0} ({1} file(s) updated)' -f $reportFull, $result.ReportUpdatedFiles)
 }
 Write-Host ''
 
