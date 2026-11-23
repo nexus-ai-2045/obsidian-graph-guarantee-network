@@ -1,6 +1,16 @@
 # Obsidian Graph Network Runbook
 
-## Update
+## 通常の入口は読取り専用診断
+
+普段はaudit-obsidian-graph-network.ps1を使います。原ノート・設定・生成フォルダーを変更せず、補助Markdownやconfigを作りません。接続分析・除外・枝刈りは既存helperを再利用します。
+
+    powershell -NoProfile -File tools\audit-obsidian-graph-network.ps1 -Vault "C:\Path\To\Vault" -Top 0
+
+以下のupdaterは生成を明示的に選んだ時だけの書込み操作です。_graph-network内のファイルとgraph/app設定を変更するため、対象・差分・バックアップ・復元方法を先にレビューします。機械的coverageは意味的関連性の保証ではありません。新しい設定ファイルやローダーを自動追加しません。
+
+-PruneStaleは新生成物を書いた後のarchive処理で、非生成や単なる掃除として使いません。既存生成物の削除は別レビューです。
+
+## Update (optional generation)
 
 Run this after adding, moving, or deleting vault notes:
 
@@ -95,8 +105,8 @@ human-readable summary on the information stream. The object fields are:
 - `NativeDegreeMin` / `NativeDegreeMedian` / `NativeDegreeMax` — native degree
   distribution across covered notes.
 - `UnresolvedLinks` — links that did not resolve to a single covered note.
-- `NotesRescuedByGeneratedNetwork` — native orphans that the generated network
-  connects (equal to `OrphanNotes`).
+- `NotesRescuedByGeneratedNetwork` — legacy compatibility name for potential coverage
+  (equal to `OrphanNotes`); the audit does not inspect generated files to prove actual rescue.
 
 The output is deterministic: enumeration order, the orphan sample, and the
 component counts are ordinal-stable, so two runs over an unchanged vault produce
