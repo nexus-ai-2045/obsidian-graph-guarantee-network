@@ -77,7 +77,6 @@ test harness は一時 fixture を使用します。fixture 成功を実 vault �
 - `tools/public-safety-scan.ps1`: 公開前の safety scan。
 - [runbook](tools/obsidian-graph-network-runbook.md): 運用・復元上の注意。
 - [エージェント用プロンプト](tools/obsidian-graph-network-generic-windows-prompt.md): 診断を先に行う操作手順。
-- [第二脳との統合設計 (提案)](docs/second-brain-integration.md): 共通契約と検証条件の提案。実装済みを意味しません。
 - [GITHUB_SETTINGS.md](GITHUB_SETTINGS.md): GitHub repository settings の日本語メモ。
 
 ## 公開ステータス
