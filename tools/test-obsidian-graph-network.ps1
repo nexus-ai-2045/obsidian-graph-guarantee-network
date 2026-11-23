@@ -1196,9 +1196,9 @@ try {
 
 try {
   $fence = '`' * 3
-  $mdContent = @('[to b](b.md) [web](https://example.com/x.md) ![pic](pic.png) [anchor](#top) [spaced](<sub/d e.md>) [enc](sub/d%20e.md#part) [bare](c) [paren](Plan(draft).md)', $fence, '[hidden](hidden.md)', $fence) -join "`n"
+  $mdContent = @('[to b](b.md) [web](https://example.com/x.md) ![pic](pic.png) [anchor](#top) [spaced](<sub/d e.md>) [enc](sub/d%20e.md#part) [bare](c) [paren](Plan(draft).md) [t1](q1.md "Title") [t2](q2.md ''Title'') [t3](q3.md (Title))', $fence, '[hidden](hidden.md)', $fence) -join "`n"
   $mdTargets = @(Get-GraphNetMarkdownLinkTargets -Content $mdContent)
-  Add-TestResult 'markdown link parse keeps note targets and skips URLs, anchors, attachments and code' (($mdTargets -join '|') -ceq 'b.md|sub/d e.md|sub/d e.md|c|Plan(draft).md') ('targets=' + ($mdTargets -join '|'))
+  Add-TestResult 'markdown link parse keeps note targets and skips URLs, anchors, attachments and code' (($mdTargets -join '|') -ceq 'b.md|sub/d e.md|sub/d e.md|c|Plan(draft).md|q1.md|q2.md|q3.md') ('targets=' + ($mdTargets -join '|'))
 } catch {
   Add-TestResult 'markdown link parse path' $false $_.Exception.Message
 }
