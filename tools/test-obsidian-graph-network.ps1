@@ -267,6 +267,35 @@ function Get-NoteHashes {
   return $hashes
 }
 
+if ([System.IO.Path]::DirectorySeparatorChar -eq '/') {
+  $vault = $null
+  $outside = $null
+  try {
+    $vault = New-SmallTestVault
+    $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-link-target-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $outside | Out-Null
+    $target = Join-Path $outside 'outside.md'
+    Set-TestFileUtf8 -Path $target -Content '# Outside vault'
+    New-Item -ItemType SymbolicLink -Path (Join-Path $vault 'outside-link.md') -Target $target | Out-Null
+    New-Item -ItemType SymbolicLink -Path (Join-Path $vault 'dangling-link.md') -Target (Join-Path $outside 'missing.md') | Out-Null
+
+    $coveredNames = @(Get-GraphNetCoveredNoteFiles -Vault $vault | ForEach-Object { $_.Name })
+    Add-TestResult 'walker excludes dangling file symlinks' ($coveredNames -notcontains 'dangling-link.md') ($coveredNames -join ', ')
+    Add-TestResult 'walker excludes file symlinks outside the vault' ($coveredNames -notcontains 'outside-link.md') ($coveredNames -join ', ')
+    Add-TestResult 'walker keeps all ordinary notes beside file symlinks' (($coveredNames.Count -eq 4) -and (@(1..4 | Where-Object { $coveredNames -notcontains ('note-{0}.md' -f $_) }).Count -eq 0)) ($coveredNames -join ', ')
+  } catch {
+    Add-TestResult 'file symlink fixture path' $false $_.Exception.Message
+  } finally {
+    foreach ($fixtureRoot in @($vault, $outside)) {
+      if ($null -ne $fixtureRoot -and (Test-Path -LiteralPath $fixtureRoot)) {
+        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+      }
+    }
+  }
+} else {
+  Write-Warning 'File symlink fixture runs only where the directory separator is /.'
+}
+
 try {
   $vault = New-TestVault
   $beforeHashes = Get-NoteHashes -Vault $vault
