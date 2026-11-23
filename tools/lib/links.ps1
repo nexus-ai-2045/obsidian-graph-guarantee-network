@@ -231,6 +231,11 @@ function Get-GraphNetNativeGraph {
       # that path first; wikilinks and vault-root paths fall through below.
       if ($linkTarget.Markdown -and (-not $rawTarget.StartsWith('/'))) {
         $relative = Resolve-GraphNetRelativeTarget -FromNode $node -Target $normalized
+        # A relative path such as ../_graph-network/hub only shows that it
+        # points into the generated network after it is collapsed.
+        if (($null -ne $relative) -and $relative.StartsWith($networkPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+          continue
+        }
         if (($null -ne $relative) -and $nodeByPath.ContainsKey($relative) -and (-not $ambiguousPaths.Contains($relative))) {
           $resolved = $nodeByPath[$relative]
         }

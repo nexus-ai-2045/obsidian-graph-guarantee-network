@@ -1222,6 +1222,23 @@ try {
 }
 
 try {
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-audit-mdgen-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault 'sub') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault 'other') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'sub/a.md') -Content "# A`n`n[hub](../_graph-network/hub.md)"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'other/hub.md') -Content '# Hub'
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'native audit drops relative Markdown links into the generated network' (($audit.CoveredNotes -eq 2) -and ($audit.OrphanNotes -eq 2) -and ($audit.UnresolvedLinks -eq 0)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'native audit relative generated link path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
   $vault = New-AuditIslandVault
   Set-TestFileUtf8 -Path (Join-Path $vault 'linker.md') -Content "# Linker`n`n[[missing-note]]"
   $reportDir = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-report-' + [guid]::NewGuid().ToString('N'))
