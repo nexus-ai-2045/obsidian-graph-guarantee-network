@@ -10,7 +10,8 @@ Obsidian のノート本文を変更せず、既存リンクの孤立・連結�
 
 ## できること
 
-- 既存 wikilink による孤立ノート、連結成分、次数、未解決・曖昧なリンクを読取り専用で測定します。
+- 既存の wikilink と Markdown リンクによる孤立ノート、連結成分、次数、未解決・曖昧なリンクを読取り専用で測定します。
+- 任意で、AI エージェント向けの JSON、人が読む Markdown、Obsidian Bases のビューを1つのフォルダに書き出します。
 - 診断と生成は共通の走査・除外・リンク解析を再利用し、依存物とキャッシュを列挙前に枝刈りします。
 - 任意の生成モードでは専用フォルダ内に coverage shard と hub を生成し、原ノート本文へリンクを挿入しません。
 - 生成モードで追加する既定の除外は、既存の `userIgnoreFilters` を消さずに補います。
@@ -36,7 +37,23 @@ macOS では `brew install powershell ripgrep` で PowerShell 7 と ripgrep を�
 
 主な出力は `CoveredNotes`、`OrphanNotes`、`NativeConnectedComponents`、`LargestComponentSize`、`UnresolvedLinks`、native degree の分布です。生成された coverage リンクは native の分析から除外します。出力は機械可読な object と人間可読サマリで、同じ入力での出力は決定的です。
 
-wikilink の解決は basename ベースの近似です。相対パス一致を優先し、無ければ ordinal case-insensitive な basename の一意一致で解決します。曖昧 (basename 複数一致) や未解決の target は `UnresolvedLinks` に計上し、edge にはしません。コードブロック (```` ``` ```` や `~~~` で囲んだ部分) とインラインのコードの中にある `[[...]]` は例として扱い、リンクに数えません。ただし、行頭から4文字以上字下げした柵と、引用 (`> `) の中の柵はコードブロックとして扱わないため、その中の `[[...]]` は数えます。
+リンクは `[[wikilink]]` と、Obsidian が同じように扱う Markdown 形式の `[text](note.md)` を数えます。Markdown 形式は、URL (`https:` など)、同じノート内の見出し (`#...`)、`.md` 以外の添付ファイルを除き、URL エンコードを戻してから、リンク元ノートのフォルダからの相対パスを先に試します。リンクの解決は basename ベースの近似です。相対パス一致を優先し、無ければ ordinal case-insensitive な basename の一意一致で解決します。曖昧 (basename 複数一致) や未解決の target は `UnresolvedLinks` に計上し、edge にはしません。コードブロック (```` ``` ```` や `~~~` で囲んだ部分) とインラインのコードの中にある `[[...]]` は例として扱い、リンクに数えません。ただし、行頭から4文字以上字下げした柵と、引用 (`> `) の中の柵はコードブロックとして扱わないため、その中の `[[...]]` は数えます。
+
+### 診断レポートを出す (任意)
+
+`-ReportDirectory` を付けると、そのフォルダにだけ次の3ファイルを書きます。ノート本文は変更しません。付けなければ、これまでどおり何も書きません。
+
+```sh
+pwsh -NoProfile -File tools/audit-obsidian-graph-network.ps1 -Vault ~/Vaults/MyVault -Top 0 -ReportDirectory ~/Vaults/MyVault/_graph-audit
+```
+
+- `graph-audit.json`: AI エージェントやスクリプト向け。集計、孤立ノートの全件、2〜`-SmallIslandMaxSize` (既定 5) 件の小さな島、未解決・曖昧なリンク (リンク元・リンク先・理由) を含みます。
+- `graph-audit.md`: 人が読む版。ノート名はリンクではなくコードとして書くので、レポート自体がグラフに辺を足しません。孤立と島をどうつなぐかの手順も書いてあります。
+- `graph-audit.base`: Obsidian の Bases (コアプラグイン、1.9 以降) で開くビュー。「バックリンクがないノート」と「外向きのリンクがないノート」を一覧にします。`file.backlinks` は Obsidian の文書で重い処理とされ、自動更新されないため、数値の基準はこの診断のほうです。
+
+出力に日時や vault の絶対パスは入れず、同じ vault なら同じ内容になります (再実行で `ReportUpdatedFiles : 0`)。レポートフォルダを vault の中に置いた場合、そのフォルダは診断の対象から外れ、`.base` のフィルタでも除外されます。生成ネットワークの `_graph-network` の中には書けません。レポートにはノート名が入るので、公開 repository に保存しないでください。
+
+進め方の考え方は、孤立を機械的なリンクで隠すのではなく、見つけて意味のあるリンクを足すことです。参考: [Karpathy の LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) の lint (孤立ページ・足りない相互参照を探す)、[Obsidian Bases の構文](https://obsidian.md/help/bases/syntax)。
 
 ### 生成ネットワークを明示的に選ぶ場合
 
@@ -87,6 +104,7 @@ test harness は一時 fixture を使用します。fixture 成功を実 vault �
   - `lib/graph.ps1`: bucket・隣接・連結成分の計算。
   - `lib/links.ps1`: wikilink の解析と native graph。
   - `lib/generated.ps1`: 生成ネットワークの lane・生成物・Smart Connections と graph 設定。
+  - `lib/report.ps1`: 診断レポート (JSON / Markdown / Bases) の組立てと書込み。
 - `tools/update-obsidian-graph-network.ps1`: 任意の生成・設定反映。
 - `tools/test-obsidian-graph-network.ps1`: local test harness。
 - `tools/verify-obsidian-graph-network.ps1`: 実装・運用チェックをまとめて確認する aggregate verification。
