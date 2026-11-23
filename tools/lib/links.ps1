@@ -21,9 +21,11 @@ function Get-GraphNetMarkdownLinkTargets {
   # (https:, mailto:, obsidian: ...), same-note anchors (#heading), and targets
   # with a non-.md extension (attachments) are skipped. The fragment is cut,
   # the destination is URL-decoded, and a trailing .md is kept for the resolver.
+  # A bare destination may hold one level of balanced parentheses, as in
+  # Plan(draft).md, which CommonMark allows.
   $targets = [System.Collections.Generic.List[string]]::new()
   $linkSource = Remove-GraphNetCodeFromMarkdown -Content $Content
-  $pattern = '\[(?:[^\[\]\r\n]|\[[^\[\]\r\n]*\])*\]\(\s*(<[^>\r\n]+>|[^)\s]+)(?:\s+"[^"\r\n]*")?\s*\)'
+  $pattern = '\[(?:[^\[\]\r\n]|\[[^\[\]\r\n]*\])*\]\(\s*(<[^>\r\n]+>|(?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"\r\n]*")?\s*\)'
   foreach ($match in [regex]::Matches($linkSource, $pattern)) {
     $raw = $match.Groups[1].Value
     if ($raw.StartsWith('<') -and $raw.EndsWith('>')) {
