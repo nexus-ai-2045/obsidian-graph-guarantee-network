@@ -5,6 +5,14 @@
 
 $script:GraphNetGraphNetworkFolder = '_graph-network'
 $script:GraphNetCoverageShardPrefix = 'coverage-shard'
+# Linux file systems are case-sensitive, Windows and default macOS volumes are
+# not. Folder comparisons follow the file system. Windows PowerShell 5.1 has no
+# $IsLinux, which reads as false there.
+$script:GraphNetPathComparison = if ((Get-Variable -Name IsLinux -ValueOnly -ErrorAction SilentlyContinue) -eq $true) {
+  [System.StringComparison]::Ordinal
+} else {
+  [System.StringComparison]::OrdinalIgnoreCase
+}
 $script:GraphNetGraphExcludedTopFolders = @(
   '.obsidian',
   '.smart-env',

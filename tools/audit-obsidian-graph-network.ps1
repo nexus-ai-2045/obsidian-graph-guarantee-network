@@ -47,13 +47,13 @@ $reportRelative = $null
 if (-not [string]::IsNullOrWhiteSpace($ReportDirectory)) {
   $reportFull = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ReportDirectory).TrimEnd([char[]]@('\', '/'))
   $vaultPrefix = $Vault.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
-  if ($reportFull.StartsWith($vaultPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+  if ($reportFull.StartsWith($vaultPrefix, $script:GraphNetPathComparison)) {
     $reportRelative = ($reportFull.Substring($vaultPrefix.Length) -replace '\\', '/')
     $firstPart = $reportRelative.Split('/')[0]
     if ($firstPart -ieq $script:GraphNetGraphNetworkFolder) {
       throw ("ReportDirectory must not be inside the generated {0} folder." -f $script:GraphNetGraphNetworkFolder)
     }
-  } elseif ($reportFull -ieq $Vault.TrimEnd([char[]]@('\', '/'))) {
+  } elseif ([string]::Equals($reportFull, $Vault.TrimEnd([char[]]@('\', '/')), $script:GraphNetPathComparison)) {
     throw "ReportDirectory must be a folder, not the vault root itself."
   }
 }
@@ -65,7 +65,7 @@ if (-not [string]::IsNullOrWhiteSpace($ReportDirectory)) {
 $notes = @(Get-GraphNetCoveredNoteFiles -Vault $Vault)
 if ($null -ne $reportRelative) {
   $reportPrefix = $reportFull + [System.IO.Path]::DirectorySeparatorChar
-  $notes = @($notes | Where-Object { -not $_.FullName.StartsWith($reportPrefix, [System.StringComparison]::OrdinalIgnoreCase) })
+  $notes = @($notes | Where-Object { -not $_.FullName.StartsWith($reportPrefix, $script:GraphNetPathComparison) })
 }
 
 $native = Get-GraphNetNativeGraph -Vault $Vault -Notes $notes

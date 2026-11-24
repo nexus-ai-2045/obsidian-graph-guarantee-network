@@ -46,7 +46,8 @@ function ConvertTo-GraphNetWikiTarget {
 function Test-GraphNetExcludedPathPart {
   param(
     [string]$Part,
-    [bool]$TopLevel = $false
+    [bool]$TopLevel = $false,
+    [bool]$IsFile = $false
   )
 
   # Single per-segment exclusion source shared by Test-GraphNetCoveredNotePath
@@ -61,7 +62,9 @@ function Test-GraphNetExcludedPathPart {
   if ($script:GraphNetGraphExcludedPathParts -contains $Part) {
     return $true
   }
-  if ($Part.ToLowerInvariant().Contains('cache')) {
+  # Cache folders such as build-cache hold tool output. A note whose own file
+  # name mentions cache (cache-invalidation.md) is still a note.
+  if ((-not $IsFile) -and $Part.ToLowerInvariant().Contains('cache')) {
     return $true
   }
   return $false
@@ -78,7 +81,7 @@ function Test-GraphNetCoveredNotePath {
     return $false
   }
   for ($i = 0; $i -lt $parts.Count; $i++) {
-    if (Test-GraphNetExcludedPathPart -Part $parts[$i] -TopLevel ($i -eq 0)) {
+    if (Test-GraphNetExcludedPathPart -Part $parts[$i] -TopLevel ($i -eq 0) -IsFile ($i -eq ($parts.Count - 1))) {
       return $false
     }
   }
