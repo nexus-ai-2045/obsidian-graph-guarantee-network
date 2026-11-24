@@ -56,3 +56,19 @@ jobs:
       # verify は失敗時に Write-Error + 非ゼロ exit を返すため、step 失敗として検出される。
       - name: Run aggregate verification
         run: ./tools/verify-obsidian-graph-network.ps1
+
+  # Branch protection requires one check named "verify". The matrix jobs above
+  # report as "verify (os, shell)", so this job turns them into that one check.
+  verify-all:
+    name: verify
+    needs: verify
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every matrix job to pass
+        shell: bash
+        env:
+          MATRIX_RESULT: ${{ needs.verify.result }}
+        run: |
+          echo "matrix result: $MATRIX_RESULT"
+          test "$MATRIX_RESULT" = success
