@@ -1293,6 +1293,293 @@ try {
   }
 }
 
+# ---- adversarial probes (reviewer A): links.ps1 / vault-walk.ps1 ----
+# Append after the existing audit tests (needs $AuditScriptPath, Invoke-AuditScript,
+# Get-LastResult, Set-TestFileUtf8, Add-TestResult). Each probe PASSES only when
+# the audit behaves the way Obsidian does.
+
+try {
+  # PROBE-A1: wikilinks and embeds to existing attachments (![[x.png]], [[x.pdf]])
+  # are resolved links in Obsidian, never unresolved "missing" links.
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-a1-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'diagram.png') -Content 'fake image bytes'
+  Set-TestFileUtf8 -Path (Join-Path $vault 'paper.pdf') -Content 'fake pdf bytes'
+  Set-TestFileUtf8 -Path (Join-Path $vault 'a.md') -Content "# A`n`n![[diagram.png]]`n`n[[paper.pdf]]`n`n[[b]]"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'b.md') -Content '# B'
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'PROBE-A1: wikilink embeds of existing attachments are not counted as unresolved links' (($audit.CoveredNotes -eq 2) -and ($audit.OrphanNotes -eq 0) -and ($audit.UnresolvedLinks -eq 0)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'PROBE-A1: attachment wikilink path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # PROBE-A2: inside a Markdown table Obsidian requires the alias pipe to be
+  # escaped, [[target\|alias]]. Obsidian resolves it to "target".
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-a2-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'table-note.md') -Content "# Table`n`n| Link | Note |`n| --- | --- |`n| [[target-note\|Shown name]] | row |"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'target-note.md') -Content '# Target'
+  $parsed = @(Get-GraphNetWikilinkTargets -Content '| [[target-note\|Shown name]] |')
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'PROBE-A2: escaped-pipe alias wikilinks in tables resolve to their target' (($audit.CoveredNotes -eq 2) -and ($audit.OrphanNotes -eq 0) -and ($audit.UnresolvedLinks -eq 0)) ('parsed=' + ($parsed -join ',') + ' ' + ($audit | Out-String))
+} catch {
+  Add-TestResult 'PROBE-A2: escaped-pipe table wikilink path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # PROBE-A3: with Obsidian's "Relative path to file" link format, wikilinks are
+  # written relative to the linking note ([[../y/readme]]). That format exists to
+  # pick one of several same-named notes, so it must resolve even when the
+  # basename is duplicated.
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-a3-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault 'proj/x') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault 'proj/y') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'proj/x/readme.md') -Content '# X readme'
+  Set-TestFileUtf8 -Path (Join-Path $vault 'proj/y/readme.md') -Content '# Y readme'
+  Set-TestFileUtf8 -Path (Join-Path $vault 'proj/x/index.md') -Content "# Index`n`n[[../y/readme]]"
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'PROBE-A3: relative-path wikilinks resolve against the linking note even when the basename is duplicated' (($audit.CoveredNotes -eq 3) -and ($audit.OrphanNotes -eq 1) -and ($audit.NativeConnectedComponents -eq 2) -and ($audit.UnresolvedLinks -eq 0)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'PROBE-A3: relative wikilink path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # PROBE-A4: a note whose FILE NAME contains "cache" (cache-invalidation.md) is
+  # an ordinary note. It must be covered, and links to it must not be "missing".
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-a4-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'cache-invalidation.md') -Content "# Cache invalidation`n`n[[linker]]"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'linker.md') -Content "# Linker`n`n[[cache-invalidation]]"
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'PROBE-A4: a note whose file name contains cache is covered and links to it resolve' (($audit.CoveredNotes -eq 2) -and ($audit.OrphanNotes -eq 0) -and ($audit.UnresolvedLinks -eq 0)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'PROBE-A4: cache file name path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # PROBE-A5: Obsidian's default link format (shortest path when possible)
+  # writes [[graph-network-root]] for the generated root, which resolves into
+  # _graph-network. Links into the generated folder must be neither an edge nor
+  # an unresolved link.
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-a5-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '_graph-network') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault '_graph-network/graph-network-root.md') -Content "---`nnetwork_generated: true`nnetwork_role: root`n---`n`n# Graph Network"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'a.md') -Content "# A`n`n[[graph-network-root]]`n`n[[b]]"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'b.md') -Content '# B'
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'PROBE-A5: shortest-path wikilinks into the generated folder are excluded, not unresolved' (($audit.CoveredNotes -eq 2) -and ($audit.OrphanNotes -eq 0) -and ($audit.UnresolvedLinks -eq 0)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'PROBE-A5: shortest-path generated link path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  # PROBE-A6: Obsidian comments (%% ... %%) hide their content from the
+  # metadata cache, so a commented-out link is not an edge in Obsidian's graph.
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-a6-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'a.md') -Content "# A`n`n%% [[draft-target]] %%`n`n%%`n[[draft-target]]`n%%`n`n[[b]]"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'b.md') -Content '# B'
+  Set-TestFileUtf8 -Path (Join-Path $vault 'draft-target.md') -Content '# Draft target'
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'PROBE-A6: links inside Obsidian %% comments do not form edges' (($audit.CoveredNotes -eq 3) -and ($audit.OrphanNotes -eq 1) -and ($audit.OrphanSample -contains 'draft-target') -and ($audit.NativeConnectedComponents -eq 2)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'PROBE-A6: comment link path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+# ---- adversarial probes (reviewer B): reports, path rules, updater idempotency, case sensitivity ----
+# Append after the last existing test block and before the final "$tests | Format-Table" line.
+# Probes B2..B4 only run where the file system is case-sensitive (Linux); elsewhere they warn and skip.
+
+function Test-ProbeCaseSensitiveFileSystem {
+  $probeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-case-probe-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $probeRoot 'CaseDir') | Out-Null
+  try {
+    return (-not (Test-Path -LiteralPath (Join-Path $probeRoot 'casedir')))
+  } finally {
+    Remove-Item -LiteralPath $probeRoot -Recurse -Force
+  }
+}
+
+function Get-ProbeShardLinkCount {
+  param(
+    [string]$Vault,
+    [string]$Link
+  )
+
+  # Case-sensitive count of one exact generated link across all coverage shards.
+  $network = Get-GraphNetGraphNetworkPath -Vault $Vault
+  $count = 0
+  foreach ($shard in @(Get-ChildItem -LiteralPath $network -Filter ($script:GraphNetCoverageShardPrefix + '-*.md') -File)) {
+    $text = [System.IO.File]::ReadAllText($shard.FullName, [System.Text.UTF8Encoding]::new($false))
+    $count += ([regex]::Matches($text, [regex]::Escape($Link))).Count
+  }
+  return $count
+}
+
+# PROBE-B1: a case-only note rename must be written to the generated shards.
+# Write-GraphNetFileIfChanged compares with case-insensitive -eq, so new content
+# that differs from the old file only in letter case is treated as unchanged.
+$vault = $null
+try {
+  $vault = New-SmallTestVault -NoteCount 2
+  Set-TestFileUtf8 -Path (Join-Path $vault 'Alpha.md') -Content '# Alpha'
+  $null = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  $beforeOld = Get-ProbeShardLinkCount -Vault $vault -Link '[[Alpha|Alpha]]'
+  # Two-step rename so it also works on case-insensitive file systems.
+  Rename-Item -LiteralPath (Join-Path $vault 'Alpha.md') -NewName 'probe-rename-tmp.md'
+  Rename-Item -LiteralPath (Join-Path $vault 'probe-rename-tmp.md') -NewName 'alpha.md'
+  $second = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  $afterNew = Get-ProbeShardLinkCount -Vault $vault -Link '[[alpha|alpha]]'
+  $afterOld = Get-ProbeShardLinkCount -Vault $vault -Link '[[Alpha|Alpha]]'
+  $ok = ($beforeOld -eq 2) -and ($afterNew -eq 2) -and ($afterOld -eq 0) -and ($second.UpdatedFiles -ge 1)
+  Add-TestResult 'PROBE-B1: updater rewrites shards after a case-only note rename' $ok ('beforeOld=' + $beforeOld + ' afterNew=' + $afterNew + ' afterOld=' + $afterOld + ' updatedFiles=' + $second.UpdatedFiles)
+} catch {
+  Add-TestResult 'PROBE-B1: updater rewrites shards after a case-only note rename' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+# PROBE-B2: on a case-sensitive file system, a report folder OUTSIDE the vault
+# whose path differs from the vault path only in letter case must not remove
+# vault notes from the measurement (audit line 50 and 68 use OrdinalIgnoreCase).
+if (Test-ProbeCaseSensitiveFileSystem) {
+  $probeParent = $null
+  try {
+    $probeParent = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-b2-' + [guid]::NewGuid().ToString('N'))
+    $vault = Join-Path $probeParent 'Vault'
+    New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $vault 'out') | Out-Null
+    Set-TestFileUtf8 -Path (Join-Path $vault 'top.md') -Content '# Top'
+    Set-TestFileUtf8 -Path (Join-Path $vault 'out/inside.md') -Content '# Inside'
+    # Sibling folder 'vault' (lower case) is a different directory than 'Vault' here.
+    $reportDir = Join-Path (Join-Path $probeParent 'vault') 'out'
+    $audit = Get-LastResult -Output (& $AuditScriptPath -Vault $vault -Top 0 -ReportDirectory $reportDir)
+    $reportJson = Get-Content -LiteralPath (Join-Path $reportDir 'graph-audit.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $ok = ($audit.CoveredNotes -eq 2) -and ($reportJson.summary.coveredNotes -eq 2) -and (@($reportJson.orphans) -ccontains 'out/inside')
+    Add-TestResult 'PROBE-B2: report folder outside the vault (case-variant path) does not drop vault notes' $ok ('covered=' + $audit.CoveredNotes + ' orphans=' + (@($reportJson.orphans) -join ','))
+  } catch {
+    Add-TestResult 'PROBE-B2: report folder outside the vault (case-variant path) does not drop vault notes' $false $_.Exception.Message
+  } finally {
+    if ($probeParent -and (Test-Path -LiteralPath $probeParent)) {
+      Remove-Item -LiteralPath $probeParent -Recurse -Force
+    }
+  }
+} else {
+  Write-Warning 'PROBE-B2 runs only on a case-sensitive file system.'
+}
+
+# PROBE-B3: on a case-sensitive file system, Alpha.md and alpha.md are two
+# notes. The native adjacency is a case-insensitive @{} hashtable, so both
+# nodes share one neighbor set and the unlinked alpha.md is not reported as an
+# orphan, and the component count drops.
+if (Test-ProbeCaseSensitiveFileSystem) {
+  $vault = $null
+  try {
+    $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-probe-b3-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+    Set-TestFileUtf8 -Path (Join-Path $vault 'Alpha.md') -Content "# Upper alpha`n`n[[Beta]]"
+    Set-TestFileUtf8 -Path (Join-Path $vault 'alpha.md') -Content '# Lower alpha, no links in or out'
+    Set-TestFileUtf8 -Path (Join-Path $vault 'Beta.md') -Content '# Beta'
+    $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+    $ok = ($audit.CoveredNotes -eq 3) -and ($audit.OrphanNotes -eq 1) -and (@($audit.OrphanSample) -ccontains 'alpha') -and ($audit.NativeConnectedComponents -eq 2) -and ($audit.LargestComponentSize -eq 2)
+    Add-TestResult 'PROBE-B3: audit keeps case-variant notes apart on a case-sensitive file system' $ok ($audit | Out-String)
+  } catch {
+    Add-TestResult 'PROBE-B3: audit keeps case-variant notes apart on a case-sensitive file system' $false $_.Exception.Message
+  } finally {
+    if ($vault -and (Test-Path -LiteralPath $vault)) {
+      Remove-Item -LiteralPath $vault -Recurse -Force
+    }
+  }
+} else {
+  Write-Warning 'PROBE-B3 runs only on a case-sensitive file system.'
+}
+
+# PROBE-B4: on a case-sensitive file system the updater writes two shard links
+# for each of Alpha.md and alpha.md, but validation counts edges in a
+# case-insensitive @{} hashtable, merges them to one target with 4 edges and
+# throws a false guarantee failure.
+if (Test-ProbeCaseSensitiveFileSystem) {
+  $vault = $null
+  try {
+    $vault = New-SmallTestVault -NoteCount 2
+    Set-TestFileUtf8 -Path (Join-Path $vault 'Alpha.md') -Content '# Upper alpha'
+    Set-TestFileUtf8 -Path (Join-Path $vault 'alpha.md') -Content '# Lower alpha'
+    $errorText = ''
+    $result = $null
+    try {
+      $result = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+    } catch {
+      $errorText = $_.Exception.Message
+    }
+    $upper = Get-ProbeShardLinkCount -Vault $vault -Link '[[Alpha|Alpha]]'
+    $lower = Get-ProbeShardLinkCount -Vault $vault -Link '[[alpha|alpha]]'
+    $ok = ($errorText -eq '') -and ($null -ne $result) -and ($result.GuaranteeOk -eq $true) -and ($result.CoveredNotes -eq 4) -and ($upper -eq 2) -and ($lower -eq 2)
+    Add-TestResult 'PROBE-B4: updater accepts case-variant note names on a case-sensitive file system' $ok ('error=' + $errorText + ' upperLinks=' + $upper + ' lowerLinks=' + $lower)
+  } catch {
+    Add-TestResult 'PROBE-B4: updater accepts case-variant note names on a case-sensitive file system' $false $_.Exception.Message
+  } finally {
+    if ($vault -and (Test-Path -LiteralPath $vault)) {
+      Remove-Item -LiteralPath $vault -Recurse -Force
+    }
+  }
+} else {
+  Write-Warning 'PROBE-B4 runs only on a case-sensitive file system.'
+}
+
+# PROBE-B5: generated network files must be byte-identical on every OS (the
+# code claims cross-machine idempotency), so a vault synced between Windows and
+# macOS/Linux is not rewritten on every run. Write-Utf8IfChanged joins lines with
+# [Environment]::NewLine, so Windows writes CRLF and the other OSes write LF.
+$vault = $null
+try {
+  $vault = New-SmallTestVault -NoteCount 3
+  $null = Get-LastResult -Output (Invoke-NetworkScript -Vault $vault -BucketCount 8)
+  $network = Get-GraphNetGraphNetworkPath -Vault $vault
+  $crFiles = [System.Collections.Generic.List[string]]::new()
+  foreach ($generated in @(Get-ChildItem -LiteralPath $network -Filter '*.md' -File)) {
+    $bytes = [System.IO.File]::ReadAllBytes($generated.FullName)
+    if ([System.Array]::IndexOf($bytes, [byte]13) -ge 0) {
+      $crFiles.Add($generated.Name)
+    }
+  }
+  Add-TestResult 'PROBE-B5: generated network files use LF only, identical across OSes' ($crFiles.Count -eq 0) ('filesWithCR=' + ($crFiles -join ', '))
+} catch {
+  Add-TestResult 'PROBE-B5: generated network files use LF only, identical across OSes' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
 $tests | Format-Table -AutoSize
 
 if ($failures.Count -ne 0) {
