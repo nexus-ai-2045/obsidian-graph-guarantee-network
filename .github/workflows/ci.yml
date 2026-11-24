@@ -11,22 +11,64 @@ permissions:
 
 jobs:
   verify:
-    runs-on: windows-latest
+    name: verify (${{ matrix.os }}, ${{ matrix.shell }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows PowerShell 5.1 stays the compatibility floor.
+          - os: windows-latest
+            shell: powershell
+          - os: windows-latest
+            shell: pwsh
+          - os: ubuntu-latest
+            shell: pwsh
+          - os: macos-latest
+            shell: pwsh
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
       # verify script は unresolved marker 検査に ripgrep (rg) を必須とするため、
       # runner への preinstall 有無に依存せず無条件で導入する。
-      - name: Install ripgrep
+      - name: Install ripgrep (Windows)
+        if: runner.os == 'Windows'
         run: choco install ripgrep -y --no-progress
+      - name: Install ripgrep (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo apt-get update -q && sudo apt-get install -y -q ripgrep
+      - name: Install ripgrep (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install ripgrep
 
       # test harness は fixture vault を OS の temp directory にのみ作成し、
       # 各 case 終了時に削除する (repo 内には書き込まない)。
       # そのため直後の verify にある git worktree clean チェックとこの順序で両立する。
       - name: Run test harness
-        run: powershell -NoProfile -File tools/test-obsidian-graph-network.ps1
+        run: ./tools/test-obsidian-graph-network.ps1
 
       # verify は失敗時に Write-Error + 非ゼロ exit を返すため、step 失敗として検出される。
       - name: Run aggregate verification
-        run: powershell -NoProfile -File tools/verify-obsidian-graph-network.ps1
+        run: ./tools/verify-obsidian-graph-network.ps1
+
+  # Branch protection requires one check named "verify". The matrix jobs above
+  # report as "verify (os, shell)", so this job turns them into that one check.
+  verify-all:
+    name: verify
+    needs: verify
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every matrix job to pass
+        shell: bash
+        env:
+          MATRIX_RESULT: ${{ needs.verify.result }}
+        run: |
+          echo "matrix result: $MATRIX_RESULT"
+          test "$MATRIX_RESULT" = success
