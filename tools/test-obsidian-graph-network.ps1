@@ -1192,6 +1192,107 @@ try {
   Add-TestResult 'audit omitted vault failure path' $false $_.Exception.Message
 }
 
+# ---- Markdown links and audit reports ----
+
+try {
+  $fence = '`' * 3
+  $mdContent = @('[to b](b.md) [web](https://example.com/x.md) ![pic](pic.png) [anchor](#top) [spaced](<sub/d e.md>) [enc](sub/d%20e.md#part) [bare](c) [paren](Plan(draft).md) [t1](q1.md "Title") [t2](q2.md ''Title'') [t3](q3.md (Title))', $fence, '[hidden](hidden.md)', $fence) -join "`n"
+  $mdTargets = @(Get-GraphNetMarkdownLinkTargets -Content $mdContent)
+  Add-TestResult 'markdown link parse keeps note targets and skips URLs, anchors, attachments and code' (($mdTargets -join '|') -ceq 'b.md|sub/d e.md|sub/d e.md|c|Plan(draft).md|q1.md|q2.md|q3.md') ('targets=' + ($mdTargets -join '|'))
+} catch {
+  Add-TestResult 'markdown link parse path' $false $_.Exception.Message
+}
+
+try {
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-audit-mdlinks-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault 'sub') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'a.md') -Content "# A`n`n[to b](b.md) and [web](https://example.com/c.md)"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'b.md') -Content '# B'
+  Set-TestFileUtf8 -Path (Join-Path $vault 'c.md') -Content "# C`n`n[down](sub/d%20e.md)"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'sub/d e.md') -Content "# D`n`n[up](../c.md) [gone](../missing.md)"
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'native audit counts Markdown links, relative to the linking note' (($audit.CoveredNotes -eq 4) -and ($audit.OrphanNotes -eq 0) -and ($audit.NativeConnectedComponents -eq 2) -and ($audit.UnresolvedLinks -eq 1)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'native audit markdown link path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-audit-mdgen-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault '.obsidian') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault 'sub') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $vault 'other') | Out-Null
+  Set-TestFileUtf8 -Path (Join-Path $vault 'sub/a.md') -Content "# A`n`n[hub](../_graph-network/hub.md)"
+  Set-TestFileUtf8 -Path (Join-Path $vault 'other/hub.md') -Content '# Hub'
+  $audit = Get-LastResult -Output (Invoke-AuditScript -Vault $vault)
+  Add-TestResult 'native audit drops relative Markdown links into the generated network' (($audit.CoveredNotes -eq 2) -and ($audit.OrphanNotes -eq 2) -and ($audit.UnresolvedLinks -eq 0)) ($audit | Out-String)
+} catch {
+  Add-TestResult 'native audit relative generated link path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-AuditIslandVault
+  Set-TestFileUtf8 -Path (Join-Path $vault 'linker.md') -Content "# Linker`n`n[[missing-note]]"
+  $reportDir = Join-Path ([System.IO.Path]::GetTempPath()) ('obsidian-graph-network-report-' + [guid]::NewGuid().ToString('N'))
+  $before = Get-AuditVaultSnapshot -Vault $vault
+  $first = Get-LastResult -Output (& $AuditScriptPath -Vault $vault -Top 0 -ReportDirectory $reportDir)
+  $second = Get-LastResult -Output (& $AuditScriptPath -Vault $vault -Top 0 -ReportDirectory $reportDir)
+  $after = Get-AuditVaultSnapshot -Vault $vault
+  $vaultDiffs = @(Compare-Object ($before.GetEnumerator() | Sort-Object Name) ($after.GetEnumerator() | Sort-Object Name) -Property Name, Value)
+  $json = Get-Content -LiteralPath (Join-Path $reportDir 'graph-audit.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $markdown = Get-Content -LiteralPath (Join-Path $reportDir 'graph-audit.md') -Raw -Encoding UTF8
+  $base = Get-Content -LiteralPath (Join-Path $reportDir 'graph-audit.base') -Raw -Encoding UTF8
+  $orphanList = @($json.orphans)
+  $islandCount = @($json.smallIslands).Count
+  $unresolvedEntry = @($json.unresolvedLinks)[0]
+  $ok = ($first.ReportUpdatedFiles -eq 3) -and ($second.ReportUpdatedFiles -eq 0) -and ($vaultDiffs.Count -eq 0) -and
+    ($json.schema -eq 'obsidian-graph-audit/v1') -and ($json.summary.orphanNotes -eq 2) -and
+    ($orphanList -contains 'orphan') -and ($orphanList -contains 'linker') -and ($islandCount -eq 2) -and
+    ($unresolvedEntry.source -eq 'linker') -and ($unresolvedEntry.target -eq 'missing-note') -and ($unresolvedEntry.reason -eq 'missing') -and
+    ($markdown.Contains('- `orphan`')) -and (-not $markdown.Contains('[[')) -and (-not $markdown.Contains($vault)) -and
+    ($base.Contains("'file.backlinks.isEmpty()'")) -and ($base.Contains('!file.inFolder("_graph-network")'))
+  Add-TestResult 'audit report writes JSON, Markdown and Bases files, is idempotent, and leaves the vault unchanged' $ok ('first=' + $first.ReportUpdatedFiles + ' second=' + $second.ReportUpdatedFiles + ' vaultDiffs=' + $vaultDiffs.Count + ' json=' + ($json | ConvertTo-Json -Depth 8 -Compress))
+} catch {
+  Add-TestResult 'audit report path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+  if ($reportDir -and (Test-Path -LiteralPath $reportDir)) {
+    Remove-Item -LiteralPath $reportDir -Recurse -Force
+  }
+}
+
+try {
+  $vault = New-AuditIslandVault
+  $reportDir = Join-Path $vault '_graph-audit'
+  $first = Get-LastResult -Output (& $AuditScriptPath -Vault $vault -Top 0 -ReportDirectory $reportDir)
+  $second = Get-LastResult -Output (& $AuditScriptPath -Vault $vault -Top 0 -ReportDirectory $reportDir)
+  $base = Get-Content -LiteralPath (Join-Path $reportDir 'graph-audit.base') -Raw -Encoding UTF8
+  Add-TestResult 'a report folder inside the vault is left out of the measured notes' (($first.CoveredNotes -eq 5) -and ($second.CoveredNotes -eq 5) -and ($second.ReportUpdatedFiles -eq 0) -and $base.Contains('!file.inFolder("_graph-audit")')) ('first=' + $first.CoveredNotes + ' second=' + $second.CoveredNotes + ' updated=' + $second.ReportUpdatedFiles)
+  $rejected = $false
+  try {
+    $null = & $AuditScriptPath -Vault $vault -ReportDirectory (Join-Path $vault '_graph-network')
+  } catch {
+    $rejected = $_.Exception.Message -match 'must not be inside the generated'
+  }
+  Add-TestResult 'audit refuses to write a report into the generated network folder' ($rejected -and (-not (Test-Path -LiteralPath (Join-Path $vault '_graph-network')))) 'report into _graph-network was not rejected'
+} catch {
+  Add-TestResult 'audit in-vault report path' $false $_.Exception.Message
+} finally {
+  if ($vault -and (Test-Path -LiteralPath $vault)) {
+    Remove-Item -LiteralPath $vault -Recurse -Force
+  }
+}
+
 $tests | Format-Table -AutoSize
 
 if ($failures.Count -ne 0) {

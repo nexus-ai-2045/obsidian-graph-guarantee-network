@@ -3,6 +3,96 @@
 # Native wikilink parsing and the native graph used by the read-only audit.
 # Loaded by obsidian-graph-network-lib.ps1. Do not dot-source this file on its own.
 
+function Remove-GraphNetCodeFromMarkdown {
+  param([string]$Content)
+
+  # Strip fenced code blocks (``` or ~~~, unclosed fences run to the end) and
+  # inline code spans so link examples written as code are not counted. Shared by
+  # the wikilink and the Markdown-link parsers.
+  $withoutFences = [regex]::Replace([string]$Content, '(?ms)^[ \t]{0,3}(?:(`{3,})(?=[^`\r\n]*\r?$)|(~{3,}))[^\r\n]*(?:\r?\n.*?^[ \t]{0,3}(?(1)\1`*|\2~*)[ \t]*\r?$|.*\z)', '')
+  return [regex]::Replace($withoutFences, '(?s)(?<!`)(?<!(?<!\\)\\(?:\\\\)*)(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n).)+?(?<!`)\1(?!`)', '')
+}
+
+function Get-GraphNetMarkdownLinkTargets {
+  param([string]$Content)
+
+  # Pull note targets out of Markdown-style links, [text](target) and embeds
+  # ![alt](target), which Obsidian resolves like wikilinks. URLs with a scheme
+  # (https:, mailto:, obsidian: ...), same-note anchors (#heading), and targets
+  # with a non-.md extension (attachments) are skipped. The fragment is cut,
+  # the destination is URL-decoded, and a trailing .md is kept for the resolver.
+  # A bare destination may hold one level of balanced parentheses, as in
+  # Plan(draft).md, which CommonMark allows. An optional title may be
+  # wrapped in double quotes, single quotes or parentheses.
+  $targets = [System.Collections.Generic.List[string]]::new()
+  $linkSource = Remove-GraphNetCodeFromMarkdown -Content $Content
+  $pattern = '\[(?:[^\[\]\r\n]|\[[^\[\]\r\n]*\])*\]\(\s*(<[^>\r\n]+>|(?:[^()\s]|\([^()\s]*\))+)(?:\s+(?:"[^"\r\n]*"|''[^''\r\n]*''|\([^()\r\n]*\)))?\s*\)'
+  foreach ($match in [regex]::Matches($linkSource, $pattern)) {
+    $raw = $match.Groups[1].Value
+    if ($raw.StartsWith('<') -and $raw.EndsWith('>')) {
+      $raw = $raw.Substring(1, $raw.Length - 2)
+    }
+    if ($raw -match '^[A-Za-z][A-Za-z0-9+.-]*:') {
+      continue
+    }
+    $hash = $raw.IndexOf('#')
+    if ($hash -ge 0) {
+      $raw = $raw.Substring(0, $hash)
+    }
+    try {
+      $decoded = [System.Uri]::UnescapeDataString($raw)
+    } catch {
+      $decoded = $raw
+    }
+    $decoded = $decoded.Trim()
+    if ($decoded.Length -eq 0) {
+      continue
+    }
+    $leaf = $decoded
+    $slash = $decoded.LastIndexOfAny([char[]]@('/', '\'))
+    if ($slash -ge 0) {
+      $leaf = $decoded.Substring($slash + 1)
+    }
+    $dot = $leaf.LastIndexOf('.')
+    if (($dot -gt 0) -and (-not $leaf.EndsWith('.md', [System.StringComparison]::OrdinalIgnoreCase))) {
+      continue
+    }
+    $targets.Add($decoded)
+  }
+  return @($targets)
+}
+
+function Resolve-GraphNetRelativeTarget {
+  param(
+    [string]$FromNode,
+    [string]$Target
+  )
+
+  # Join a Markdown-link target with the linking note's folder and fold . and ..
+  # segments. Returns $null when the path climbs above the vault root.
+  $folder = ''
+  $slash = $FromNode.LastIndexOf('/')
+  if ($slash -ge 0) {
+    $folder = $FromNode.Substring(0, $slash)
+  }
+  $joined = if ($folder.Length -gt 0) { $folder + '/' + $Target } else { $Target }
+  $parts = [System.Collections.Generic.List[string]]::new()
+  foreach ($part in $joined.Split([char[]]@('/'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+    if ($part -eq '.') {
+      continue
+    }
+    if ($part -eq '..') {
+      if ($parts.Count -eq 0) {
+        return $null
+      }
+      $parts.RemoveAt($parts.Count - 1)
+      continue
+    }
+    $parts.Add($part)
+  }
+  return ($parts -join '/')
+}
+
 function Get-GraphNetWikilinkTargets {
   param([string]$Content)
 
@@ -12,8 +102,7 @@ function Get-GraphNetWikilinkTargets {
   # Embeds (![[...]]) are treated as links too. Whitespace-only targets are
   # dropped. This is the shared wikilink parse for the native connectivity audit.
   $targets = [System.Collections.Generic.List[string]]::new()
-  $withoutFences = [regex]::Replace([string]$Content, '(?ms)^[ \t]{0,3}(?:(`{3,})(?=[^`\r\n]*\r?$)|(~{3,}))[^\r\n]*(?:\r?\n.*?^[ \t]{0,3}(?(1)\1`*|\2~*)[ \t]*\r?$|.*\z)', '')
-  $linkSource = [regex]::Replace($withoutFences, '(?s)(?<!`)(?<!(?<!\\)\\(?:\\\\)*)(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n).)+?(?<!`)\1(?!`)', '')
+  $linkSource = Remove-GraphNetCodeFromMarkdown -Content $Content
   foreach ($match in [regex]::Matches($linkSource, '\[\[([^\[\]]+)\]\]')) {
     $inner = $match.Groups[1].Value
     $pipe = $inner.IndexOf('|')
@@ -67,7 +156,8 @@ function Get-GraphNetNativeGraph {
     [object[]]$Notes = @()
   )
 
-  # Build the vault's native (author-authored) undirected wikilink graph over the
+  # Build the vault's native (author-authored) undirected link graph (wikilinks
+  # and Markdown links) over the
   # covered notes, deliberately excluding every link into the generated
   # _graph-network folder so the machine-added coverage edges do not mask the
   # vault's real connectivity. Link targets resolve to a covered note by:
@@ -110,10 +200,19 @@ function Get-GraphNetNativeGraph {
   }
 
   $unresolved = 0
+  $unresolvedDetails = [System.Collections.Generic.List[object]]::new()
   foreach ($note in $Notes) {
     $node = ConvertTo-GraphNetWikiTarget -Path $note.FullName -Vault $Vault
     $content = [System.IO.File]::ReadAllText($note.FullName, $encoding)
-    foreach ($rawTarget in (Get-GraphNetWikilinkTargets -Content $content)) {
+    $linkTargets = [System.Collections.Generic.List[object]]::new()
+    foreach ($wikiTarget in (Get-GraphNetWikilinkTargets -Content $content)) {
+      $linkTargets.Add([pscustomobject]@{ Target = $wikiTarget; Markdown = $false })
+    }
+    foreach ($markdownTarget in (Get-GraphNetMarkdownLinkTargets -Content $content)) {
+      $linkTargets.Add([pscustomobject]@{ Target = $markdownTarget; Markdown = $true })
+    }
+    foreach ($linkTarget in $linkTargets) {
+      $rawTarget = $linkTarget.Target
       $normalized = ($rawTarget -replace '\\', '/').TrimStart('/')
       if ($normalized.EndsWith('.md', [System.StringComparison]::OrdinalIgnoreCase)) {
         $normalized = $normalized.Substring(0, $normalized.Length - 3)
@@ -128,9 +227,24 @@ function Get-GraphNetNativeGraph {
       }
 
       $resolved = $null
-      if ($nodeByPath.ContainsKey($normalized) -and (-not $ambiguousPaths.Contains($normalized))) {
+      $ambiguous = $false
+      # Markdown links are usually written relative to the linking note, so try
+      # that path first; wikilinks and vault-root paths fall through below.
+      if ($linkTarget.Markdown -and (-not $rawTarget.StartsWith('/'))) {
+        $relative = Resolve-GraphNetRelativeTarget -FromNode $node -Target $normalized
+        # A relative path such as ../_graph-network/hub only shows that it
+        # points into the generated network after it is collapsed.
+        if (($null -ne $relative) -and $relative.StartsWith($networkPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+          continue
+        }
+        if (($null -ne $relative) -and $nodeByPath.ContainsKey($relative) -and (-not $ambiguousPaths.Contains($relative))) {
+          $resolved = $nodeByPath[$relative]
+        }
+      }
+      if (($null -eq $resolved) -and $nodeByPath.ContainsKey($normalized) -and (-not $ambiguousPaths.Contains($normalized))) {
         $resolved = $nodeByPath[$normalized]
-      } else {
+      }
+      if ($null -eq $resolved) {
         $base = $normalized
         $slash = $normalized.LastIndexOf('/')
         if ($slash -ge 0) {
@@ -138,11 +252,18 @@ function Get-GraphNetNativeGraph {
         }
         if ($nodesByBasename.ContainsKey($base) -and ($nodesByBasename[$base].Count -eq 1)) {
           $resolved = $nodesByBasename[$base][0]
+        } elseif ($nodesByBasename.ContainsKey($base) -or $ambiguousPaths.Contains($normalized)) {
+          $ambiguous = $true
         }
       }
 
       if ($null -eq $resolved) {
         $unresolved++
+        $unresolvedDetails.Add([pscustomobject]@{
+          Source = $node
+          Target = $normalized
+          Reason = if ($ambiguous) { 'ambiguous' } else { 'missing' }
+        })
         continue
       }
       if ($resolved -ne $node) {
@@ -156,5 +277,6 @@ function Get-GraphNetNativeGraph {
     Adjacency = $adjacency
     Nodes = @($nodeList)
     UnresolvedLinks = $unresolved
+    UnresolvedLinkDetails = @($unresolvedDetails)
   }
 }

@@ -152,3 +152,41 @@ function Get-GraphNetNetworkConnectedComponentCount {
   $adjacency = Get-GraphNetNetworkAdjacency -NetworkPath $NetworkPath
   return (Get-GraphNetComponentStats -Adjacency $adjacency).ComponentCount
 }
+
+function Get-GraphNetComponents {
+  param([hashtable]$Adjacency)
+
+  # Same BFS as Get-GraphNetComponentStats, but returns every component's
+  # members (ordinal-sorted) so reports can list small islands. Components are
+  # ordered by size, largest first, then by their first member.
+  $visited = [System.Collections.Generic.HashSet[string]]::new()
+  $components = [System.Collections.Generic.List[object]]::new()
+
+  foreach ($start in @($Adjacency.Keys | Sort-Object)) {
+    if ($visited.Contains($start)) {
+      continue
+    }
+    $members = [System.Collections.Generic.List[string]]::new()
+    $queue = [System.Collections.Generic.Queue[string]]::new()
+    $queue.Enqueue($start)
+    $null = $visited.Add($start)
+    while ($queue.Count -gt 0) {
+      $current = $queue.Dequeue()
+      $members.Add($current)
+      foreach ($neighbor in $Adjacency[$current]) {
+        if (-not $visited.Contains($neighbor)) {
+          $null = $visited.Add($neighbor)
+          $queue.Enqueue($neighbor)
+        }
+      }
+    }
+    $sorted = [string[]]$members.ToArray()
+    [System.Array]::Sort($sorted, [System.StringComparer]::Ordinal)
+    $components.Add([pscustomobject]@{
+      Size = $sorted.Length
+      Members = $sorted
+    })
+  }
+
+  return @($components | Sort-Object -Property @{ Expression = 'Size'; Descending = $true }, @{ Expression = { $_.Members[0] }; Ascending = $true })
+}

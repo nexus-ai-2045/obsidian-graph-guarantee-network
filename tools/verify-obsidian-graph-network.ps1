@@ -41,6 +41,7 @@ try {
     'tools/lib/graph.ps1',
     'tools/lib/links.ps1',
     'tools/lib/generated.ps1',
+    'tools/lib/report.ps1',
     'tools/update-obsidian-graph-network.ps1',
     'tools/audit-obsidian-graph-network.ps1',
     'tools/test-obsidian-graph-network.ps1',
