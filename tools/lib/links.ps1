@@ -108,6 +108,10 @@ function Get-GraphNetWikilinkTargets {
     $pipe = $inner.IndexOf('|')
     if ($pipe -ge 0) {
       $inner = $inner.Substring(0, $pipe)
+      # Inside a Markdown table the alias pipe is written escaped, [[note\|alias]].
+      if ($inner.EndsWith('\')) {
+        $inner = $inner.Substring(0, $inner.Length - 1)
+      }
     }
     # Cut at the earliest heading (#) or block (^) marker so both forms, and the
     # combined target#heading^block form, reduce to the bare target.
@@ -150,133 +154,161 @@ function Get-GraphNetMedian {
   return ([double]($sorted[$mid - 1] + $sorted[$mid]) / 2.0)
 }
 
+function New-GraphNetLinkIndex {
+  param(
+    [string]$Vault,
+    [object[]]$Notes = @()
+  )
+
+  # Everything link resolution needs, built once per audit. Paths and basenames
+  # are looked up without case, as Obsidian does. Two notes that differ only in
+  # case make that path ambiguous instead of silently binding to one of them.
+  # Generated notes are indexed only so links to them can be recognized and
+  # dropped; they never become nodes.
+  $index = [pscustomobject]@{
+    Nodes = [System.Collections.Generic.List[string]]::new()
+    ByPath = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    AmbiguousPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    ByBasename = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.List[string]]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    GeneratedBasenames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    GeneratedPrefix = $script:GraphNetGraphNetworkFolder + '/'
+  }
+
+  foreach ($note in $Notes) {
+    $node = ConvertTo-GraphNetWikiTarget -Path $note.FullName -Vault $Vault
+    $index.Nodes.Add($node)
+    if ($index.ByPath.ContainsKey($node)) {
+      $null = $index.AmbiguousPaths.Add($node)
+    } else {
+      $index.ByPath[$node] = $node
+    }
+    if (-not $index.ByBasename.ContainsKey($note.BaseName)) {
+      $index.ByBasename[$note.BaseName] = [System.Collections.Generic.List[string]]::new()
+    }
+    $index.ByBasename[$note.BaseName].Add($node)
+  }
+
+  $network = Get-GraphNetGraphNetworkPath -Vault $Vault
+  if (Test-Path -LiteralPath $network -PathType Container) {
+    foreach ($generated in @(Get-ChildItem -LiteralPath $network -Filter '*.md' -File)) {
+      $null = $index.GeneratedBasenames.Add($generated.BaseName)
+    }
+  }
+  return $index
+}
+
+function Resolve-GraphNetLinkTarget {
+  param(
+    [pscustomobject]$Index,
+    [string]$FromNode,
+    [string]$Target
+  )
+
+  # Resolve one link target the way Obsidian does: relative to the linking
+  # note, then as a vault path, then by unique basename. The outcome is one of
+  # note, generated, attachment, missing or ambiguous. Only note becomes an
+  # edge. generated and attachment are dropped. missing and ambiguous are
+  # reported as unresolved. $null means there is nothing to resolve.
+  $normalized = ($Target -replace '\\', '/')
+  $fromRoot = $normalized.StartsWith('/')
+  $normalized = $normalized.TrimStart('/')
+  $leafDot = $normalized.LastIndexOf('.')
+  if (($leafDot -gt $normalized.LastIndexOf('/')) -and ($script:GraphNetAttachmentExtensions -contains $normalized.Substring($leafDot).ToLowerInvariant())) {
+    return [pscustomobject]@{ Outcome = 'attachment'; Node = $null; Target = $normalized }
+  }
+  if ($normalized.EndsWith('.md', [System.StringComparison]::OrdinalIgnoreCase)) {
+    $normalized = $normalized.Substring(0, $normalized.Length - 3)
+  }
+  if ($normalized.Length -eq 0) {
+    return $null
+  }
+
+  $candidates = [System.Collections.Generic.List[string]]::new()
+  if (-not $fromRoot) {
+    $relative = Resolve-GraphNetRelativeTarget -FromNode $FromNode -Target $normalized
+    if ($null -ne $relative) {
+      $candidates.Add($relative)
+    }
+  }
+  $candidates.Add($normalized)
+  foreach ($candidate in $candidates) {
+    if ($candidate.StartsWith($Index.GeneratedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return [pscustomobject]@{ Outcome = 'generated'; Node = $null; Target = $normalized }
+    }
+    if ($Index.ByPath.ContainsKey($candidate) -and (-not $Index.AmbiguousPaths.Contains($candidate))) {
+      return [pscustomobject]@{ Outcome = 'note'; Node = $Index.ByPath[$candidate]; Target = $normalized }
+    }
+  }
+
+  $base = $normalized.Substring($normalized.LastIndexOf('/') + 1)
+  $outcome = 'missing'
+  $node = $null
+  if ($Index.ByBasename.ContainsKey($base)) {
+    if ($Index.ByBasename[$base].Count -eq 1) {
+      $outcome = 'note'
+      $node = $Index.ByBasename[$base][0]
+    } else {
+      $outcome = 'ambiguous'
+    }
+  } elseif ($Index.AmbiguousPaths.Contains($normalized)) {
+    $outcome = 'ambiguous'
+  } elseif (($normalized.IndexOf('/') -lt 0) -and $Index.GeneratedBasenames.Contains($base)) {
+    $outcome = 'generated'
+  }
+  return [pscustomobject]@{ Outcome = $outcome; Node = $node; Target = $normalized }
+}
+
 function Get-GraphNetNativeGraph {
   param(
     [string]$Vault,
     [object[]]$Notes = @()
   )
 
-  # Build the vault's native (author-authored) undirected link graph (wikilinks
-  # and Markdown links) over the
-  # covered notes, deliberately excluding every link into the generated
-  # _graph-network folder so the machine-added coverage edges do not mask the
-  # vault's real connectivity. Link targets resolve to a covered note by:
-  #   (a) relative-path match (separators and a trailing .md normalized away), or
-  #   (b) a unique basename match (ordinal, case-insensitive).
-  # Ambiguous (multiple basename hits or case-folded path collisions) and
-  # unresolved targets are counted in UnresolvedLinks and never form an edge, so
-  # the walk never crashes on a dangling or duplicate link. Every covered note is
-  # a node even with no edges, so orphans are represented.
+  # The vault's own undirected link graph over the covered notes, from
+  # wikilinks and Markdown links. Links into the generated _graph-network
+  # folder are left out, so the machine-added coverage edges never hide the
+  # vault's real connectivity. Every covered note is a node even with no
+  # edges, so orphans show up. Nodes are file paths, so on a case-sensitive
+  # file system Alpha and alpha stay two nodes.
   $encoding = [System.Text.UTF8Encoding]::new($false)
-  $networkPrefix = $script:GraphNetGraphNetworkFolder + '/'
-
-  $nodeByPath = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  $ambiguousPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  $nodesByBasename = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.List[string]]]::new([System.StringComparer]::OrdinalIgnoreCase)
-
-  $adjacency = @{}
-  $nodeList = [System.Collections.Generic.List[string]]::new()
-
-  foreach ($note in $Notes) {
-    $node = ConvertTo-GraphNetWikiTarget -Path $note.FullName -Vault $Vault
-    $nodeList.Add($node)
-    if (-not $adjacency.ContainsKey($node)) {
-      $adjacency[$node] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    }
-
-    # A case-folded relative-path collision (for example Foo/a and foo/a) makes
-    # that path ambiguous for resolution instead of silently binding to one note.
-    if ($nodeByPath.ContainsKey($node)) {
-      $null = $ambiguousPaths.Add($node)
-    } else {
-      $nodeByPath[$node] = $node
-    }
-
-    $base = $note.BaseName
-    if (-not $nodesByBasename.ContainsKey($base)) {
-      $nodesByBasename[$base] = [System.Collections.Generic.List[string]]::new()
-    }
-    $nodesByBasename[$base].Add($node)
+  $index = New-GraphNetLinkIndex -Vault $Vault -Notes $Notes
+  $adjacency = [hashtable]::new([System.StringComparer]::Ordinal)
+  foreach ($node in $index.Nodes) {
+    $adjacency[$node] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   }
 
-  $unresolved = 0
   $unresolvedDetails = [System.Collections.Generic.List[object]]::new()
-  foreach ($note in $Notes) {
-    $node = ConvertTo-GraphNetWikiTarget -Path $note.FullName -Vault $Vault
-    $content = [System.IO.File]::ReadAllText($note.FullName, $encoding)
-    $linkTargets = [System.Collections.Generic.List[object]]::new()
-    foreach ($wikiTarget in (Get-GraphNetWikilinkTargets -Content $content)) {
-      $linkTargets.Add([pscustomobject]@{ Target = $wikiTarget; Markdown = $false })
-    }
-    foreach ($markdownTarget in (Get-GraphNetMarkdownLinkTargets -Content $content)) {
-      $linkTargets.Add([pscustomobject]@{ Target = $markdownTarget; Markdown = $true })
-    }
-    foreach ($linkTarget in $linkTargets) {
-      $rawTarget = $linkTarget.Target
-      $normalized = ($rawTarget -replace '\\', '/').TrimStart('/')
-      if ($normalized.EndsWith('.md', [System.StringComparison]::OrdinalIgnoreCase)) {
-        $normalized = $normalized.Substring(0, $normalized.Length - 3)
-      }
-      if ($normalized.Length -eq 0) {
+  for ($i = 0; $i -lt $Notes.Count; $i++) {
+    $node = $index.Nodes[$i]
+    $content = [System.IO.File]::ReadAllText($Notes[$i].FullName, $encoding)
+    $targets = @(Get-GraphNetWikilinkTargets -Content $content) + @(Get-GraphNetMarkdownLinkTargets -Content $content)
+    foreach ($target in $targets) {
+      $resolution = Resolve-GraphNetLinkTarget -Index $index -FromNode $node -Target $target
+      if ($null -eq $resolution) {
         continue
       }
-      # Links into the generated network are removed from the native graph
-      # entirely: they are neither an edge nor an unresolved link.
-      if ($normalized.StartsWith($networkPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        continue
-      }
-
-      $resolved = $null
-      $ambiguous = $false
-      # Markdown links are usually written relative to the linking note, so try
-      # that path first; wikilinks and vault-root paths fall through below.
-      if ($linkTarget.Markdown -and (-not $rawTarget.StartsWith('/'))) {
-        $relative = Resolve-GraphNetRelativeTarget -FromNode $node -Target $normalized
-        # A relative path such as ../_graph-network/hub only shows that it
-        # points into the generated network after it is collapsed.
-        if (($null -ne $relative) -and $relative.StartsWith($networkPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-          continue
+      switch ($resolution.Outcome) {
+        'note' {
+          if ($resolution.Node -cne $node) {
+            $null = $adjacency[$node].Add($resolution.Node)
+            $null = $adjacency[$resolution.Node].Add($node)
+          }
         }
-        if (($null -ne $relative) -and $nodeByPath.ContainsKey($relative) -and (-not $ambiguousPaths.Contains($relative))) {
-          $resolved = $nodeByPath[$relative]
+        { $_ -in @('missing', 'ambiguous') } {
+          $unresolvedDetails.Add([pscustomobject]@{
+            Source = $node
+            Target = $resolution.Target
+            Reason = $resolution.Outcome
+          })
         }
-      }
-      if (($null -eq $resolved) -and $nodeByPath.ContainsKey($normalized) -and (-not $ambiguousPaths.Contains($normalized))) {
-        $resolved = $nodeByPath[$normalized]
-      }
-      if ($null -eq $resolved) {
-        $base = $normalized
-        $slash = $normalized.LastIndexOf('/')
-        if ($slash -ge 0) {
-          $base = $normalized.Substring($slash + 1)
-        }
-        if ($nodesByBasename.ContainsKey($base) -and ($nodesByBasename[$base].Count -eq 1)) {
-          $resolved = $nodesByBasename[$base][0]
-        } elseif ($nodesByBasename.ContainsKey($base) -or $ambiguousPaths.Contains($normalized)) {
-          $ambiguous = $true
-        }
-      }
-
-      if ($null -eq $resolved) {
-        $unresolved++
-        $unresolvedDetails.Add([pscustomobject]@{
-          Source = $node
-          Target = $normalized
-          Reason = if ($ambiguous) { 'ambiguous' } else { 'missing' }
-        })
-        continue
-      }
-      if ($resolved -ne $node) {
-        $null = $adjacency[$node].Add($resolved)
-        $null = $adjacency[$resolved].Add($node)
       }
     }
   }
 
   return [pscustomobject]@{
     Adjacency = $adjacency
-    Nodes = @($nodeList)
-    UnresolvedLinks = $unresolved
+    Nodes = @($index.Nodes)
+    UnresolvedLinks = $unresolvedDetails.Count
     UnresolvedLinkDetails = @($unresolvedDetails)
   }
 }
