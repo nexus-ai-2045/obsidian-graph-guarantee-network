@@ -26,7 +26,7 @@ function Write-GraphNetFileIfChanged {
 
   if (Test-Path -LiteralPath $Path -PathType Leaf) {
     $existing = [System.IO.File]::ReadAllText($Path, $encoding)
-    if ($existing -eq $Content) {
+    if ($existing -ceq $Content) {
       return $false
     }
   }
@@ -42,7 +42,9 @@ function Write-Utf8IfChanged {
     [string[]]$Lines
   )
 
-  $content = ($Lines -join [Environment]::NewLine) + [Environment]::NewLine
+  # LF on every OS, so a vault synced between Windows and macOS is not
+  # rewritten on each run.
+  $content = ($Lines -join "`n") + "`n"
   return (Write-GraphNetFileIfChanged -Path $Path -Content $content)
 }
 
@@ -201,7 +203,9 @@ function Write-GraphNetNetworkFiles {
   })
 
   $updatedFiles = [System.Collections.Generic.List[string]]::new()
-  $targetEdgeCounts = @{}
+  # Note identities are file paths, so Alpha and alpha on a case-sensitive file
+  # system are two targets.
+  $targetEdgeCounts = [hashtable]::new([System.StringComparer]::Ordinal)
 
   for ($i = 0; $i -lt $bucketCountUsed; $i++) {
     $fileName = '{0}-{1:D2}.md' -f $ShardPrefix, $i
@@ -371,7 +375,7 @@ function Test-GraphNetNetworkGuarantee {
   $notes = $Build.Notes
   $bucketCountUsed = $Build.BucketCountUsed
 
-  $expectedTargets = @{}
+  $expectedTargets = [hashtable]::new([System.StringComparer]::Ordinal)
   foreach ($note in $notes) {
     $expectedTargets[(ConvertTo-GraphNetWikiTarget -Path $note.FullName -Vault $Vault)] = $true
   }

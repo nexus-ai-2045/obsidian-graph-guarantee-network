@@ -5,6 +5,14 @@
 
 $script:GraphNetGraphNetworkFolder = '_graph-network'
 $script:GraphNetCoverageShardPrefix = 'coverage-shard'
+# Linux file systems are case-sensitive, Windows and default macOS volumes are
+# not. Folder comparisons follow the file system. Windows PowerShell 5.1 has no
+# $IsLinux, which reads as false there.
+$script:GraphNetPathComparison = if ((Get-Variable -Name IsLinux -ValueOnly -ErrorAction SilentlyContinue) -eq $true) {
+  [System.StringComparison]::Ordinal
+} else {
+  [System.StringComparison]::OrdinalIgnoreCase
+}
 $script:GraphNetGraphExcludedTopFolders = @(
   '.obsidian',
   '.smart-env',
@@ -30,6 +38,15 @@ $script:GraphNetGraphExcludedPathParts = @(
   'cache',
   'vendor',
   $script:GraphNetGraphNetworkFolder
+)
+# File types Obsidian opens itself. A wikilink such as ![[diagram.png]] points at
+# one of these, not at a note, so the audit neither draws an edge for it nor
+# counts it as unresolved. From Obsidian Help, Accepted file formats.
+$script:GraphNetAttachmentExtensions = @(
+  '.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.svg', '.webp',
+  '.flac', '.m4a', '.mp3', '.ogg', '.wav', '.webm', '.3gp',
+  '.mkv', '.mov', '.mp4', '.ogv',
+  '.pdf', '.canvas', '.base'
 )
 $script:GraphNetPathSeparators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 $script:GraphNetWikilinkUnsafeChars = [char[]]@('#', '|', '^', '[', ']')
